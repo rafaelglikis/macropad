@@ -1,19 +1,10 @@
-import yaml
-
-from event_handlers.DebugHandler import DebugHandler
-from event_handlers.EchoHandler import EchoHandler
+from Profile import Profile
 from interceptor import listen
 
 
 def main():
     try:
-        # with open('profile.yml', 'r') as file:
-        #     profile = yaml.safe_load(file)
-        #     print(profile)
-        listen('Generic USB Keyboard', [
-            EchoHandler(),
-            DebugHandler(),
-        ])
+        listen(Profile())
     except KeyboardInterrupt:
         print('Keyboard interrupt exiting')
         return

@@ -1,7 +1,7 @@
 import evdev
 from evdev import KeyEvent, InputDevice
 
-from event_handlers import HandlerProtocol
+from Profile import Profile
 
 
 def _find_device(device_id: str) -> InputDevice:
@@ -15,11 +15,11 @@ def _find_device(device_id: str) -> InputDevice:
     raise NameError(f"Device not found: {device_id}")
 
 
-def listen(device_id: str, handlers: list[HandlerProtocol]):
-    device = _find_device(device_id)
+def listen(profile: Profile):
+    device = _find_device(profile.device)
     device.grab()
     for e in device.read_loop():
         event = evdev.categorize(e)
         if isinstance(event, KeyEvent):
-            for handler in handlers:
+            for handler in profile.handlers:
                 handler.handle(e)
