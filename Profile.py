@@ -2,6 +2,7 @@ import yaml
 
 from event_handlers.DebugHandler import DebugHandler
 from event_handlers.EchoHandler import EchoHandler
+from event_handlers.CommandHandler import CommandHandler
 from event_handlers.VoidHandler import VoidHandler
 
 
@@ -10,6 +11,8 @@ def create_handler_from_config(handler):
         return DebugHandler()
     if handler['name'] == 'echo':
         return EchoHandler()
+    if handler['name'] == 'command':
+        return CommandHandler(handler['config'])
     print(f"Handler named {handler['name']} not found!")
     return VoidHandler()
 

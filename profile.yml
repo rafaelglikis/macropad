@@ -1,13 +1,15 @@
 device: Generic USB Keyboard
 version: 0
 handlers:
-  - name: debug
-  - name: echo
-  - name: mapper
-    data:
+  - name: command
+    config:
+      dry_run: true
       binds:
         KEY_KP1:
-          on_press:
-            - google-chrome https://gitlab.com/learnworlds/platform/codeneurons/-/pipelines --profile-directory="Profile 1"
-            - google-chrome https://gitlab.com/learnworlds/platform/codeneuronsAPI/-/pipelines --profile-directory="Profile 1"
-            - google-chrome https://gitlab.com/learnworlds/platform/core/-/pipelines --profile-directory="Profile 1"
+          up:
+            - google-chrome https://google.com
+          down:
+            - google-chrome https://youtube.com
+        KEY_KP2:
+          up:
+            - xdotool key super+alt+o
