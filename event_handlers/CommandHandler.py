@@ -39,17 +39,20 @@ class CommandHandler:
         for command in current_key_bindings[event_value]:
             self.run_command(command)
 
-    def run_command(self, command) -> None:
+    def run_command(self, command) -> int:
         print(f'Executing {command}')
         if self.dry_run:
-            return
+            return 0
 
         try:
             pid = os.fork()
             if pid > 0:
                 os.waitid(os.P_PID, pid, os.WEXITED)
+
+                return 1
         except Exception as e:
             print(e)
+
             sys.exit(1)
 
         os.setsid()
@@ -64,4 +67,7 @@ class CommandHandler:
             sys.exit(1)
 
         subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+
         os._exit(os.EX_OK)
+
+        return 1
