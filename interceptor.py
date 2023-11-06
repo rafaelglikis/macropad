@@ -25,20 +25,29 @@ def print_device_info(device: InputDevice):
     print('-----------------------------------------')
 
 
-def detect() -> None:
+def detect() -> InputDevice:
     initial_devices = evdev.list_devices()
     devices = evdev.list_devices()
+
     print('Detecting new devices, please connect your device.')
     while True:
         if len(devices) > len(initial_devices):
             break
-        time.sleep(1)
-        devices = evdev.list_devices()
+        time.sleep(0.3)
+        initial_devices, devices = devices, evdev.list_devices()
 
+    print('New devices detected!')
     new_devices = list(set(devices) - set(initial_devices))
-    device = InputDevice(new_devices[0])
-    print('New device detected!')
-    print_device_info(device)
+
+    print('Press and hold any key on your device.')
+    while True:
+        for device_path in new_devices:
+            device = InputDevice(device_path)
+            if device.active_keys():
+                print_device_info(device)
+                return device
+        time.sleep(0.3)
+
 
 
 def listen(profile: Profile):

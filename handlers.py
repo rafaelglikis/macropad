@@ -21,10 +21,15 @@ class Handler(Protocol):
     """
     Protocol for Event handlers
     """
-    def handle(self, e: InputEvent):
+    def handle(self, e: InputEvent) -> None:
         """
         :param e:  Event to handle
-        :return:
+        """
+
+    @property
+    def raw_data(self) -> dict:
+        """
+        :return: Raw data in dict format
         """
 
 
@@ -33,9 +38,23 @@ class KeyboardHandler:
     Handles keyboard events
     """
     def __init__(self, config):
-        self.binds = config['bindings']
+        self.bindings = config['bindings']
         self.dry_run = config['dry_run'] if 'dry_run' in config else False
         self.notifications = config['notifications'] if 'notifications' in config else False
+
+    @property
+    def raw_data(self) -> dict:
+        raw_data = {
+            "bindings": self.bindings,
+        }
+
+        if self.notifications:
+            raw_data["notifications"] = self.notifications
+
+        if self.dry_run:
+            raw_data["dry_run"] = self.dry_run
+
+        return raw_data
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -44,11 +63,11 @@ class KeyboardHandler:
             return
 
         code = evdev.ecodes.KEY[e.code]
-        if code not in self.binds:
+        if code not in self.bindings:
             print(f'No keybinding found for {event}')
             return
 
-        current_key_bindings = self.binds[code]
+        current_key_bindings = self.bindings[code]
         event_value = _map_event(event)
 
         if event_value not in current_key_bindings:
