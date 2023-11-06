@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser('detect', help="Detects input device")
 
     listen_subparser = subparsers.add_parser('listen', help="Intercept profile device")
-    listen_subparser.add_argument('profile', help='Path to your macropad profile.')
+    listen_subparser.add_argument('profile_path', help='Path to your macropad profile.')
 
     args = parser.parse_args()
     argcomplete.autocomplete(parser)
@@ -28,7 +28,7 @@ def main():
         if args.subcommand == 'detect':
             interceptor.detect()
         if args.subcommand == 'listen':
-            listen(profile.create_from_yml(args.profile))
+            listen(profile.create_from_yml(args.profile_path))
     except KeyboardInterrupt:
         print('Keyboard interrupt exiting.')
         return
