@@ -1,8 +1,8 @@
 import os
 import subprocess
 import sys
+from typing import Protocol
 
-import chime
 import evdev
 from evdev import InputEvent, KeyEvent
 
@@ -17,14 +17,32 @@ def _map_event(e: KeyEvent) -> str:
     return ''
 
 
-class CommandHandler:
+class Handler(Protocol):
+    """
+    Protocol for Event handlers
+    """
+    def handle(self, e: InputEvent):
+        """
+        :param e:  Event to handle
+        :return:
+        """
+
+
+class KeyboardHandler:
+    """
+    Handles keyboard events
+    """
     def __init__(self, config):
-        self.binds = config['binds']
+        self.binds = config['bindings']
         self.dry_run = config['dry_run'] if 'dry_run' in config else False
         self.notifications = config['notifications'] if 'notifications' in config else False
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
+        print()
+        if not isinstance(event, KeyEvent):
+            return
+
         code = evdev.ecodes.KEY[e.code]
         if code not in self.binds:
             print(f'No keybinding found for {event}')

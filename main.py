@@ -1,7 +1,8 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
 import argcomplete
-from Profile import Profile
+
+import profile
 from interceptor import listen
 
 
@@ -18,7 +19,7 @@ def parse_args() -> argparse.Namespace:
 def main():
     try:
         args = parse_args()
-        listen(Profile(args.profile))
+        listen(profile.create_from_yml(args.profile))
     except KeyboardInterrupt:
         print('Keyboard interrupt exiting.')
         return

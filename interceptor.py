@@ -1,7 +1,7 @@
-import evdev
-from evdev import KeyEvent, InputDevice
+from profile import Profile
 
-from Profile import Profile
+import evdev
+from evdev import InputDevice
 
 
 def _find_device(device_id: str) -> InputDevice:
@@ -19,7 +19,4 @@ def listen(profile: Profile):
     device = _find_device(profile.device)
     device.grab()
     for e in device.read_loop():
-        event = evdev.categorize(e)
-        if isinstance(event, KeyEvent):
-            for handler in profile.handlers:
-                handler.handle(e)
+        profile.handler.handle(e)
