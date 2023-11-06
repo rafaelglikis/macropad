@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 
+import chime
 import evdev
 from evdev import InputEvent, KeyEvent
 
@@ -20,6 +21,7 @@ class CommandHandler:
     def __init__(self, config):
         self.binds = config['binds']
         self.dry_run = config['dry_run'] if 'dry_run' in config else False
+        self.notifications = config['notifications'] if 'notifications' in config else False
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -41,6 +43,7 @@ class CommandHandler:
 
     def run_command(self, command) -> int:
         print(f'Executing {command}')
+        self.notify('Running command', command)
         if self.dry_run:
             return 0
 
@@ -65,9 +68,16 @@ class CommandHandler:
             print(e)
 
             sys.exit(1)
-
-        subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        pipe = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        text = pipe.communicate()[0]
+        self.notify('Command finished', text)
 
         os._exit(os.EX_OK)
 
         return 1
+
+    def notify(self, title: str, message, *, expire_seconds: float = 10) -> None:
+        if not self.notifications:
+            return
+
+        subprocess.call(['notify-send', title, message, '-t', str(expire_seconds * 1000)])
