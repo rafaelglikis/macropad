@@ -1,3 +1,5 @@
+import time
+
 from profile import Profile
 
 import evdev
@@ -15,8 +17,33 @@ def _find_device(device_id: str) -> InputDevice:
     raise NameError(f"Device not found: {device_id}")
 
 
+def print_device_info(device: InputDevice):
+    print('----------- Input device info -----------')
+    print(f"name: '{device.name}'")
+    print(f"path: '{device.path}'")
+    print(f"info: '{device.info}'")
+    print('-----------------------------------------')
+
+
+def detect() -> None:
+    initial_devices = evdev.list_devices()
+    devices = evdev.list_devices()
+    print('Detecting new devices, please connect your device.')
+    while True:
+        if len(devices) > len(initial_devices):
+            break
+        time.sleep(1)
+        devices = evdev.list_devices()
+
+    new_devices = list(set(devices) - set(initial_devices))
+    device = InputDevice(new_devices[0])
+    print('New device detected!')
+    print_device_info(device)
+
+
 def listen(profile: Profile):
     device = _find_device(profile.device)
+    print_device_info(device)
     device.grab()
     for e in device.read_loop():
         profile.handler.handle(e)
