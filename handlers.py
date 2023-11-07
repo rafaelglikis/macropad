@@ -107,13 +107,12 @@ class KeyboardHandler:
             sys.exit(1)
         pipe = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         text = pipe.communicate()[0]
-        self.notify('Command finished', text)
 
         os._exit(os.EX_OK)
 
         return 1
 
-    def notify(self, title: str, message, *, expire_seconds: float = 10) -> None:
+    def notify(self, title: str, message, *, expire_seconds: float = 3) -> None:
         if not self.notifications:
             return
 
