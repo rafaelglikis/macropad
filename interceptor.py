@@ -49,10 +49,10 @@ def detect() -> InputDevice:
         time.sleep(0.3)
 
 
-
 def listen(profile: Profile):
     device = _find_device(profile.device)
     print_device_info(device)
     device.grab()
+
     for e in device.read_loop():
         profile.handler.handle(e)

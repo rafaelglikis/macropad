@@ -1,5 +1,6 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
+import errno
 import pathlib
 
 import argcomplete
@@ -38,8 +39,10 @@ def main():
         if args.subcommand == 'detect':
             detect(args)
     except KeyboardInterrupt:
-        print('Keyboard interrupt exiting.')
-        return
+        print('Keyboard interrupt. Exiting . . .')
+    except OSError as e:
+        if e.errno == 19:
+            print('Device lost. Exiting . . .')
 
 
 def detect(args: argparse.Namespace):
