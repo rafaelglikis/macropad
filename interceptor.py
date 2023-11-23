@@ -13,6 +13,7 @@ def _find_device(device_id: str) -> list[InputDevice]:
     for device in devices:
         if device.name == device_id or device.path == device_id:
             print(f'Using device {device}')
+            print_device_info(device)
             devices_to_return.append(device)
 
     if not devices_to_return:
@@ -56,7 +57,6 @@ def detect() -> InputDevice:
 def listen(profile: Profile):
     devices = _find_device(profile.device)
     for device in devices:
-        print_device_info(device)
         device.grab()
 
     while True:
