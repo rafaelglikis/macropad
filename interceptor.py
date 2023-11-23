@@ -6,15 +6,19 @@ import evdev
 from evdev import InputDevice
 
 
-def _find_device(device_id: str) -> InputDevice:
+def _find_device(device_id: str) -> list[InputDevice]:
     devices = [InputDevice(path) for path in evdev.list_devices()]
 
+    devices_to_return = []
     for device in devices:
         if device.name == device_id or device.path == device_id:
             print(f'Using device {device}')
-            return device
+            devices_to_return.append(device)
 
-    raise NameError(f"Device not found: {device_id}")
+    if not devices_to_return:
+        raise NameError(f"Device not found: {device_id}")
+
+    return devices_to_return
 
 
 def print_device_info(device: InputDevice):
@@ -50,9 +54,13 @@ def detect() -> InputDevice:
 
 
 def listen(profile: Profile):
-    device = _find_device(profile.device)
-    print_device_info(device)
-    device.grab()
+    devices = _find_device(profile.device)
+    for device in devices:
+        print_device_info(device)
+        device.grab()
 
-    for e in device.read_loop():
-        profile.handler.handle(e)
+    while True:
+        for device in devices:
+            e = device.read_one()
+            if e:
+                profile.handler.handle(e)
