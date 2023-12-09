@@ -1,12 +1,12 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
-import errno
 import pathlib
 
 import argcomplete
 
 import interceptor
 import profile
+import tray
 from interceptor import listen
 
 
@@ -35,6 +35,7 @@ def main():
     try:
         args = parse_args()
         if args.subcommand == 'listen':
+            tray.create()
             listen(profile.create_from_yml(args.profile_path))
         if args.subcommand == 'detect':
             detect(args)
