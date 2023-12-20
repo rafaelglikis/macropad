@@ -91,12 +91,11 @@ class KeyboardHandler:
         return ''
 
     def _is_hold_event(self, e):
-        previews_event = self.event_logs[-2]
-
         is_proper_hold_event = e.event.value == e.key_hold
         is_up_event_that_follows_hold_event = (
-                previews_event.event.value == e.key_hold
-                and previews_event.event.code == e.event.code
+                len(self.event_logs) >= 2
+                and self.event_logs[-2].event.value == e.key_hold
+                and self.event_logs[-2].event.code == e.event.code
         )
 
         return is_proper_hold_event or is_up_event_that_follows_hold_event
