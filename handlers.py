@@ -65,11 +65,11 @@ class KeyboardHandler:
         self.event_logs.append(event)
         self.handle_event(event, code)
 
-    @debounce(0.1)
+    @debounce(0.2)
     def handle_event(self, event: KeyEvent, code):
-        print('---------------------------')
         current_key_bindings = self.bindings[code]
         event_value = self._map_event(event)
+        self.event_logs = []
 
         if event_value not in current_key_bindings:
             print(f"No keybinding found for '{event_value}' on {event}")
@@ -82,7 +82,9 @@ class KeyboardHandler:
     def _map_event(self, e: KeyEvent) -> str:
         if self._is_hold_event(e):
             return 'hold'
-        if self._is_double_tap(e):
+        if self.is_nth_tap(e, 3):
+            return 'triple_tap'
+        if self.is_nth_tap(e, 2):
             return 'double_tap'
         if e.event.value == e.key_up:
             return 'up'
@@ -100,19 +102,17 @@ class KeyboardHandler:
 
         return is_proper_hold_event or is_up_event_that_follows_hold_event
 
-    def _is_double_tap(self, e: KeyEvent) -> bool:
-        recent_event_logs = self.event_logs[-4:]
-        self.event_logs = []
-        if len(recent_event_logs) < 4:
+    def is_nth_tap(self, e, n):
+        history_length = 2 * n
+        recent_event_logs = self.event_logs[-history_length:]
+        if len(recent_event_logs) < history_length:
             return False
-
         for i, recent_event in enumerate(recent_event_logs):
             if e.event.code != recent_event.event.code:
                 return False
             expected_event = e.key_down if i % 2 == 0 else e.key_up
             if expected_event != recent_event.event.value:
                 return False
-
         return True
 
     def run_command(self, command) -> int:
