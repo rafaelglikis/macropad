@@ -80,8 +80,7 @@ class KeyboardHandler:
             self.run_command(command)
 
     def _map_event(self, e: KeyEvent) -> str:
-        previews_event = self.event_logs[-2]
-        if previews_event.event.value == e.key_hold and previews_event.event.code == e.event.code:
+        if self._is_hold_event(e):
             return 'hold'
         if self._is_double_tap(e):
             return 'double_tap'
@@ -89,9 +88,18 @@ class KeyboardHandler:
             return 'up'
         if e.event.value == e.key_down:
             return 'down'
-        if e.event.value == e.key_hold:
-            return 'hold'
         return ''
+
+    def _is_hold_event(self, e):
+        previews_event = self.event_logs[-2]
+
+        is_proper_hold_event = e.event.value == e.key_hold
+        is_up_event_that_follows_hold_event = (
+                previews_event.event.value == e.key_hold
+                and previews_event.event.code == e.event.code
+        )
+
+        return is_proper_hold_event or is_up_event_that_follows_hold_event
 
     def _is_double_tap(self, e: KeyEvent) -> bool:
         recent_event_logs = self.event_logs[-4:]
