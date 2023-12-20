@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sys
-from typing import Protocol, Tuple
+from typing import Protocol
 
 import evdev
 from evdev import InputEvent, KeyEvent
