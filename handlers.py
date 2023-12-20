@@ -84,7 +84,6 @@ class KeyboardHandler:
         if previews_event.event.value == e.key_hold and previews_event.event.code == e.event.code:
             return 'hold'
         if self._is_double_tap(e):
-            print("Double tap detected")
             return 'double_tap'
         if e.event.value == e.key_up:
             return 'up'
