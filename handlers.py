@@ -67,6 +67,7 @@ class KeyboardHandler:
 
     @debounce(0.1)
     def handle_event(self, event: KeyEvent, code):
+        print('---------------------------')
         current_key_bindings = self.bindings[code]
         event_value = self._map_event(event)
 
@@ -79,6 +80,9 @@ class KeyboardHandler:
             self.run_command(command)
 
     def _map_event(self, e: KeyEvent) -> str:
+        previews_event = self.event_logs[-2]
+        if previews_event.event.value == e.key_hold and previews_event.event.code == e.event.code:
+            return 'hold'
         if self._is_double_tap(e):
             print("Double tap detected")
             return 'double_tap'
