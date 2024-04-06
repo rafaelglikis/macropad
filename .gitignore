@@ -3,5 +3,6 @@ tmp
 venv
 __pycache__/
 profile.yml
+profile.yml.bak
 profile2.yml
 scripts/
