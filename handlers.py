@@ -77,7 +77,7 @@ class KeyboardHandler:
 
         print(f"Commands found for '{event_value}' on {event}")
         for command in current_key_bindings[event_value]:
-            self.run_command(command)
+            daemonize_and_run_command(command)
 
     def _map_event(self, e: KeyEvent) -> str:
         if self._is_hold_event(e):
@@ -115,42 +115,49 @@ class KeyboardHandler:
                 return False
         return True
 
-    def run_command(self, command) -> int:
-        print(f'Executing {command}')
-        self.notify('Running command', command)
-        if self.dry_run:
-            return 0
-
-        try:
-            pid = os.fork()
-            if pid > 0:
-                os.waitid(os.P_PID, pid, os.WEXITED)
-
-                return 1
-        except Exception as e:
-            print(e)
-
-            sys.exit(1)
-
-        os.setsid()
-
-        try:
-            pid = os.fork()
-            if pid > 0:
-                sys.exit(0)
-        except Exception as e:
-            print(e)
-
-            sys.exit(1)
-        pipe = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        text = pipe.communicate()[0]
-
-        os._exit(os.EX_OK)
-
-        return 1
-
     def notify(self, title: str, message, *, expire_seconds: float = 3) -> None:
         if not self.notifications:
             return
 
         subprocess.call(['notify-send', title, message, '-t', str(expire_seconds * 1000)])
+
+
+def daemonize_and_run_command(command: str) -> None:
+    """Demonizes the process and executes the given shell command."""
+    try:
+        pid = os.fork()
+        if pid > 0:
+            # Parent exits
+            sys.exit(0)
+    except OSError as e:
+        print(f"First fork failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    os.chdir('/')
+    os.umask(0)
+    os.setsid()
+
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError as e:
+        print(f"Second fork failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open('/dev/null', 'rb', 0) as read_null, open('/dev/null', 'wb', 0) as write_null:
+        os.dup2(read_null.fileno(), sys.stdin.fileno())
+        os.dup2(write_null.fileno(), sys.stdout.fileno())
+        os.dup2(write_null.fileno(), sys.stderr.fileno())
+
+    try:
+        pipe = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        stdout, stderr = pipe.communicate()
+        print(stdout.decode())
+    except Exception as e:
+        print(f"Failed to execute command: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(0)
