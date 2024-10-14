@@ -65,7 +65,7 @@ class KeyboardHandler:
         self.event_logs.append(event)
         self.handle_event(event, code)
 
-    @debounce(0.1)
+    @debounce(0.2)
     def handle_event(self, event: KeyEvent, code):
         current_key_bindings = self.bindings[code]
         event_value = self._map_event(event)
