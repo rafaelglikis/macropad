@@ -63,14 +63,24 @@ class KeyboardHandler:
             return
 
         self.event_logs.append(event)
-        self.handle_event(event, code)
+        if len(self.bindings[code].keys()) == 1:
+            self.handle_event_now(event, code)
+        else:
+            self.handle_event(event, code)
 
     @debounce(0.2)
     def handle_event(self, event: KeyEvent, code):
+        self.handle_event_now(event, code)
+
+    @debounce(0.001)
+    def handle_event_now(self, event: KeyEvent, code):
         current_key_bindings = self.bindings[code]
         event_value = self._map_event(event)
-        self.event_logs = []
+        only_has_key_for_down = len(self.bindings[code].keys()) == 1 and 'down' in self.bindings[code]
+        if only_has_key_for_down and event_value == 'hold':
+            event_value = 'down'
 
+        self.event_logs = []
         if event_value not in current_key_bindings:
             print(f"No keybinding found for '{event_value}' on {event}")
             return
