@@ -97,7 +97,11 @@ class KeyboardHandler:
             return
 
         print(f"Commands found for '{event_value}' on {event}")
-        for command in current_key_bindings[event_value]:
+        key_bindings = current_key_bindings[event_value]
+        if not isinstance(key_bindings, list):
+            key_bindings = [key_bindings]
+        for command in key_bindings:
+            print(f" - Executing command: {command}")
             daemonize_and_run_command(command)
 
     def _map_event(self, e: KeyEvent) -> str:
