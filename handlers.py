@@ -7,7 +7,18 @@ import evdev
 from evdev import InputEvent, KeyEvent
 
 from utils import debounce
+import signal
 
+def reap_zombie_processes(signum, frame):
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+            if pid == 0:
+                break
+        except ChildProcessError:
+            break
+
+signal.signal(signal.SIGCHLD, reap_zombie_processes)
 
 class Handler(Protocol):
     """
@@ -133,19 +144,16 @@ class KeyboardHandler:
 
 
 def daemonize_and_run_command(command: str) -> None:
-    """Demonizes the process and executes the given shell command."""
+    """Daemonizes the process and executes the given shell command."""
     try:
+        # Fork for the command
         pid = os.fork()
         if pid > 0:
-            # Parent exits
-            sys.exit(0)
+            # Parent process just returns to allow the loop to continue
+            return
     except OSError as e:
         print(f"First fork failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    os.chdir('/')
-    os.umask(0)
-    os.setsid()
+        return
 
     try:
         pid = os.fork()
@@ -155,6 +163,11 @@ def daemonize_and_run_command(command: str) -> None:
         print(f"Second fork failed: {e}", file=sys.stderr)
         sys.exit(1)
 
+    os.chdir('/')
+    os.umask(0)
+    os.setsid()
+
+    # Redirect standard file descriptors to /dev/null
     sys.stdout.flush()
     sys.stderr.flush()
     with open('/dev/null', 'rb', 0) as read_null, open('/dev/null', 'wb', 0) as write_null:
@@ -168,6 +181,5 @@ def daemonize_and_run_command(command: str) -> None:
         print(stdout.decode())
     except Exception as e:
         print(f"Failed to execute command: {e}", file=sys.stderr)
-        sys.exit(1)
 
-    sys.exit(0)
+    sys.exit(0)  # Exit the daemonized process
