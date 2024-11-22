@@ -74,7 +74,7 @@ class KeyboardHandler:
             return
 
         self.event_logs.append(event)
-        if len(self.bindings[code].keys()) == 1:
+        if len(self.bindings[code].keys()) == 1 and not 'hold' in self.bindings[code]:
             self.handle_event_now(event, code)
         else:
             self.handle_event(event, code)
