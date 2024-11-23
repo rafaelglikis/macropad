@@ -156,7 +156,8 @@ class KeyboardHandler:
         for i, recent_event in enumerate(recent_event_logs):
             if e.event.code != recent_event.event.code:
                 return False
-            expected_event = e.key_down if i % 2 == 0 else e.key_up
+            is_even = i % 2 == 0
+            expected_event = e.key_down if is_even else e.key_up
             if expected_event != recent_event.event.value:
                 return False
         return True
