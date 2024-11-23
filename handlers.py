@@ -1,28 +1,11 @@
-
-import os
-import resource
 import subprocess
-import sys
 from typing import Protocol
 
 import evdev
 from evdev import InputEvent, KeyEvent
 
+import utils
 from utils import debounce
-import signal
-
-
-def reap_zombie_processes(signum, frame):
-    while True:
-        try:
-            pid, _ = os.waitpid(-1, os.WNOHANG)
-            if pid == 0:
-                break
-        except ChildProcessError:
-            break
-
-
-signal.signal(signal.SIGCHLD, reap_zombie_processes)
 
 
 class Handler(Protocol):
@@ -110,13 +93,11 @@ class KeyboardHandler:
         if not isinstance(key_bindings, list):
             key_bindings = [key_bindings]
         for command in key_bindings:
-            if isinstance(command, str) and command.startswith('!layer '):
-                # Activate the specified layer
-                layer_name = command.split(' ', 1)[1]
-                self.activate_layer(layer_name, code)
+            if isinstance(command, str) and command.startswith('!'):
+                self.execute_handler_command(command[1:], code)
             else:
                 print(f" - Executing command: {command}")
-                daemonize_and_run_command(command)
+                utils.daemonize_and_run_command(command)
 
         # If a layer is active and we have processed a key press that is not the activation key
         if self.active_layer and code != self.layer_activation_key:
@@ -180,58 +161,12 @@ class KeyboardHandler:
 
         subprocess.call(['notify-send', title, message, '-t', str(expire_seconds * 1000)])
 
-
-def daemonize_and_run_command(command: str) -> None:
-    """Daemonizes the process and executes the given shell command."""
-    try:
-        # First fork
-        pid = os.fork()
-        if pid > 0:
-            return  # Parent process returns to continue the loop
-    except OSError as e:
-        print(f"First fork failed: {e}", file=sys.stderr)
-        return
-
-    # Decouple from parent environment
-    os.chdir('/')
-    os.umask(0)
-    os.setsid()
-
-    try:
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(0)
-    except OSError as e:
-        print(f"Second fork failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # In the child process
-
-    # Close all file descriptors except stdin(0), stdout(1), stderr(2)
-    max_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
-    if max_fd == resource.RLIM_INFINITY:
-        max_fd = 1024  # Set a default if unlimited
-    os.closerange(3, max_fd)
-
-    # Redirect standard file descriptors to /dev/null
-    sys.stdout.flush()
-    sys.stderr.flush()
-    with open('/dev/null', 'rb', 0) as read_null, open('/dev/null', 'wb', 0) as write_null:
-        os.dup2(read_null.fileno(), sys.stdin.fileno())
-        os.dup2(write_null.fileno(), sys.stdout.fileno())
-        os.dup2(write_null.fileno(), sys.stderr.fileno())
-
-    try:
-        # Execute the command
-        pipe = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            close_fds=True
-        )
-        stdout, _ = pipe.communicate()
-    except Exception as e:
-        print(f"Failed to execute command: {e}", file=sys.stderr)
-
-    sys.exit(0)
+    def execute_handler_command(self, command, code):
+        command_with_args = command.split(' ')
+        command = command_with_args[0]
+        if command == 'layer':
+            self.activate_layer(command_with_args[1], code)
+        elif command == 'default_layer':
+            self.deactivate_layer()
+        else:
+            print(f"Handler command '{command}' not found")

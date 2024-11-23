@@ -1,12 +1,13 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
-import errno
 import pathlib
+import signal
 
 import argcomplete
 
 import interceptor
 import profile
+import utils
 from interceptor import listen
 
 
@@ -32,6 +33,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
+    signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
     try:
         args = parse_args()
         if args.subcommand == 'listen':
