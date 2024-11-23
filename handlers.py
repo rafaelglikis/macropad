@@ -1,3 +1,4 @@
+
 import os
 import resource
 import subprocess
@@ -48,23 +49,13 @@ class KeyboardHandler:
 
     def __init__(self, config):
         self.bindings = config['bindings']
-        self.dry_run = config['dry_run'] if 'dry_run' in config else False
-        self.notifications = config['notifications'] if 'notifications' in config else False
+        self.layers = config.get('layers', {})
+        self.active_layer = None
+        self.layer_activation_key = None
+        self.layer_used = False
+        self.dry_run = config.get('dry_run', False)
+        self.notifications = config.get('notifications', False)
         self.event_logs = []
-
-    @property
-    def raw_data(self) -> dict:
-        raw_data = {
-            "bindings": self.bindings,
-        }
-
-        if self.notifications:
-            raw_data["notifications"] = self.notifications
-
-        if self.dry_run:
-            raw_data["dry_run"] = self.dry_run
-
-        return raw_data
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -73,25 +64,39 @@ class KeyboardHandler:
             return
 
         code = evdev.ecodes.KEY[e.code]
-        if code not in self.bindings:
+
+        # Get current bindings (either from active layer or base bindings)
+        current_bindings = self.get_current_layer_bindings()
+        if code not in current_bindings:
             print(f'No keybinding found for {event}')
             return
 
         self.event_logs.append(event)
-        if len(self.bindings[code].keys()) == 1 and not 'hold' in self.bindings[code]:
-            self.handle_event_now(event, code)
+        if len(current_bindings[code].keys()) == 1 and 'hold' not in current_bindings[code]:
+            self.handle_event_now(event, code, current_bindings)
         else:
-            self.handle_event(event, code)
+            self.handle_event(event, code, current_bindings)
+
+        if self.active_layer and self.layer_used:
+            self.deactivate_layer()
+
+    def get_current_layer_bindings(self):
+        if self.active_layer and 'bindings' in self.layers[self.active_layer]:
+            print(f"Using layer {self.active_layer} bindings")
+            return self.layers[self.active_layer]['bindings']
+
+        print("Using base bindings")
+        return self.bindings
 
     @debounce(0.2)
-    def handle_event(self, event: KeyEvent, code):
-        self.handle_event_now(event, code)
+    def handle_event(self, event: KeyEvent, code, current_bindings):
+        self.handle_event_now(event, code, current_bindings)
 
     @debounce(0.001)
-    def handle_event_now(self, event: KeyEvent, code):
-        current_key_bindings = self.bindings[code]
+    def handle_event_now(self, event: KeyEvent, code, current_bindings):
+        current_key_bindings = current_bindings[code]
         event_value = self._map_event(event)
-        only_has_key_for_down = len(self.bindings[code].keys()) == 1 and 'down' in self.bindings[code]
+        only_has_key_for_down = len(current_key_bindings.keys()) == 1 and 'down' in current_key_bindings
         if only_has_key_for_down and event_value == 'hold':
             event_value = 'down'
 
@@ -105,8 +110,33 @@ class KeyboardHandler:
         if not isinstance(key_bindings, list):
             key_bindings = [key_bindings]
         for command in key_bindings:
-            print(f" - Executing command: {command}")
-            daemonize_and_run_command(command)
+            if isinstance(command, str) and command.startswith('!layer '):
+                # Activate the specified layer
+                layer_name = command.split(' ', 1)[1]
+                self.activate_layer(layer_name, code)
+            else:
+                print(f" - Executing command: {command}")
+                daemonize_and_run_command(command)
+
+        # If a layer is active and we have processed a key press that is not the activation key
+        if self.active_layer and code != self.layer_activation_key:
+            self.layer_used = True
+
+    def activate_layer(self, layer_name, activation_key_code):
+        if layer_name in self.layers:
+            self.active_layer = layer_name
+            self.layer_activation_key = activation_key_code
+            self.layer_used = False  # Indicates whether the layer has been used for a key press
+            print(f"Layer '{layer_name}' activated")
+            self.notify("Layer Activated", f"Layer '{layer_name}' is now active")
+        else:
+            print(f"Layer '{layer_name}' not found")
+
+    def deactivate_layer(self):
+        print(f"Layer '{self.active_layer}' deactivated")
+        self.active_layer = None
+        self.layer_activation_key = None
+        self.layer_used = False
 
     def _map_event(self, e: KeyEvent) -> str:
         if self._is_hold_event(e):
