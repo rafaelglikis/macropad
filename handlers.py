@@ -1,4 +1,5 @@
 import os
+import resource
 import subprocess
 import sys
 from typing import Protocol
@@ -9,6 +10,7 @@ from evdev import InputEvent, KeyEvent
 from utils import debounce
 import signal
 
+
 def reap_zombie_processes(signum, frame):
     while True:
         try:
@@ -18,7 +20,9 @@ def reap_zombie_processes(signum, frame):
         except ChildProcessError:
             break
 
+
 signal.signal(signal.SIGCHLD, reap_zombie_processes)
+
 
 class Handler(Protocol):
     """
@@ -150,14 +154,18 @@ class KeyboardHandler:
 def daemonize_and_run_command(command: str) -> None:
     """Daemonizes the process and executes the given shell command."""
     try:
-        # Fork for the command
+        # First fork
         pid = os.fork()
         if pid > 0:
-            # Parent process just returns to allow the loop to continue
-            return
+            return  # Parent process returns to continue the loop
     except OSError as e:
         print(f"First fork failed: {e}", file=sys.stderr)
         return
+
+    # Decouple from parent environment
+    os.chdir('/')
+    os.umask(0)
+    os.setsid()
 
     try:
         pid = os.fork()
@@ -167,9 +175,13 @@ def daemonize_and_run_command(command: str) -> None:
         print(f"Second fork failed: {e}", file=sys.stderr)
         sys.exit(1)
 
-    os.chdir('/')
-    os.umask(0)
-    os.setsid()
+    # In the child process
+
+    # Close all file descriptors except stdin(0), stdout(1), stderr(2)
+    max_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+    if max_fd == resource.RLIM_INFINITY:
+        max_fd = 1024  # Set a default if unlimited
+    os.closerange(3, max_fd)
 
     # Redirect standard file descriptors to /dev/null
     sys.stdout.flush()
@@ -180,10 +192,16 @@ def daemonize_and_run_command(command: str) -> None:
         os.dup2(write_null.fileno(), sys.stderr.fileno())
 
     try:
-        pipe = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        stdout, stderr = pipe.communicate()
-        print(stdout.decode())
+        # Execute the command
+        pipe = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            close_fds=True
+        )
+        stdout, _ = pipe.communicate()
     except Exception as e:
         print(f"Failed to execute command: {e}", file=sys.stderr)
 
-    sys.exit(0)  # Exit the daemonized process
+    sys.exit(0)
