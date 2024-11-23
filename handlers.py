@@ -114,10 +114,15 @@ class KeyboardHandler:
             print(f"Layer '{layer_name}' not found")
 
     def deactivate_layer(self):
-        print(f"Layer '{self.active_layer}' deactivated")
+        layer = self.active_layer
         self.active_layer = None
         self.layer_activation_key = None
         self.layer_used = False
+        print(f"Layer '{layer}' deactivated")
+        if layer:
+            self.notify("Layer Deactivated", f"Layer '{layer}' is now deactivated")
+        else:
+            self.notify("Layer Deactivated", "No layer was active")
 
     def _map_event(self, e: KeyEvent) -> str:
         if self._is_hold_event(e):
