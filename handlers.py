@@ -60,6 +60,7 @@ class KeyboardHandler:
         else:
             self.handle_event(event, code, current_bindings)
 
+        print(self.active_layer, self.layer_used)
         if self.active_layer and self.layer_used:
             self.deactivate_layer()
 
@@ -77,6 +78,9 @@ class KeyboardHandler:
 
     @debounce(0.001)
     def handle_event_now(self, event: KeyEvent, code, current_bindings):
+        if self.active_layer and code != self.layer_activation_key:
+            self.layer_used = True
+
         current_key_bindings = current_bindings[code]
         event_value = self._map_event(event)
         only_has_key_for_down = len(current_key_bindings.keys()) == 1 and 'down' in current_key_bindings
@@ -97,11 +101,8 @@ class KeyboardHandler:
                 self.execute_handler_command(command[1:], code)
             else:
                 print(f" - Executing command: {command}")
+                self.notify("Executing", command)
                 utils.daemonize_and_run_command(command)
-
-        # If a layer is active and we have processed a key press that is not the activation key
-        if self.active_layer and code != self.layer_activation_key:
-            self.layer_used = True
 
     def activate_layer(self, layer_name, activation_key_code):
         if layer_name in self.layers:
