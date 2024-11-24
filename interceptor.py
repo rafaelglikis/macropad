@@ -12,7 +12,6 @@ def _find_device(device_id: str) -> list[InputDevice]:
     devices_to_return = []
     for device in devices:
         if device.name == device_id or device.path == device_id:
-            print(f'Using device {device}')
             print_device_info(device)
             devices_to_return.append(device)
 
@@ -23,11 +22,7 @@ def _find_device(device_id: str) -> list[InputDevice]:
 
 
 def print_device_info(device: InputDevice):
-    print('----------- Input device info -----------')
-    print(f"name: '{device.name}'")
-    print(f"path: '{device.path}'")
-    print(f"info: '{device.info}'")
-    print('-----------------------------------------')
+    print(f"Using Device: {device.name} | Path: {device.path} | Info: {device.info}")
 
 
 def detect() -> InputDevice:
