@@ -37,7 +37,6 @@ class KeyboardHandler:
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
-        print()
         if not isinstance(event, KeyEvent):
             return
 
@@ -94,8 +93,8 @@ class KeyboardHandler:
             if isinstance(command, str) and command.startswith('^'):
                 self.execute_handler_command(command[1:], code)
             else:
-                print(f" - Executing command: {command}")
-                self.notify("Executing", command)
+                print(f"Executing command '{command}' for '{event_value}' on {event}")
+                # self.notify("Executing", command)
                 utils.daemonize_and_run_command(command)
 
     def activate_layer(self, layer_name, activation_key_code, once=False):
