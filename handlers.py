@@ -36,6 +36,7 @@ class KeyboardHandler:
         self.active_layer = None
         self.layer_activation_key = None
         self.layer_used = False
+        self.layer_once = False
         self.dry_run = config.get('dry_run', False)
         self.notifications = config.get('notifications', False)
         self.event_logs = []
@@ -61,7 +62,7 @@ class KeyboardHandler:
             self.handle_event(event, code, current_bindings)
 
         print(self.active_layer, self.layer_used)
-        if self.active_layer and self.layer_used:
+        if self.active_layer and self.layer_once and self.layer_used:
             self.deactivate_layer()
 
     def get_current_layer_bindings(self):
@@ -104,12 +105,13 @@ class KeyboardHandler:
                 self.notify("Executing", command)
                 utils.daemonize_and_run_command(command)
 
-    def activate_layer(self, layer_name, activation_key_code):
+    def activate_layer(self, layer_name, activation_key_code, once=False):
         if layer_name in self.layers:
             self.active_layer = layer_name
             self.layer_activation_key = activation_key_code
-            self.layer_used = False  # Indicates whether the layer has been used for a key press
-            print(f"Layer '{layer_name}' activated")
+            self.layer_used = False
+            self.layer_once = once
+            print(f"Layer '{layer_name}' activated {'(once)' if once else '(persistent)'}")
             self.notify("Layer Activated", f"Layer '{layer_name}' is now active")
         else:
             print(f"Layer '{layer_name}' not found")
@@ -119,6 +121,7 @@ class KeyboardHandler:
         self.active_layer = None
         self.layer_activation_key = None
         self.layer_used = False
+        self.layer_once = False
         print(f"Layer '{layer}' deactivated")
         if layer:
             self.notify("Layer Deactivated", f"Layer '{layer}' is now deactivated")
@@ -172,7 +175,9 @@ class KeyboardHandler:
         command_with_args = command.split(' ')
         command = command_with_args[0]
         if command == 'layer':
-            self.activate_layer(command_with_args[1], code)
+            layer_name = command_with_args[1]
+            once = len(command_with_args) > 2 and command_with_args[2] == 'once'
+            self.activate_layer(layer_name, code, once=once)
         elif command == 'default_layer':
             self.deactivate_layer()
         else:
