@@ -92,7 +92,7 @@ class KeyboardHandler:
         if not isinstance(key_bindings, list):
             key_bindings = [key_bindings]
         for command in key_bindings:
-            if isinstance(command, str) and command.startswith('!'):
+            if isinstance(command, str) and command.startswith('^'):
                 self.execute_handler_command(command[1:], code)
             else:
                 print(f" - Executing command: {command}")
