@@ -1,5 +1,6 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
+import multiprocessing
 import pathlib
 import signal
 
@@ -9,7 +10,7 @@ import interceptor
 import profile
 import utils
 from interceptor import listen
-import threading
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
@@ -36,14 +37,15 @@ def main():
     try:
         args = parse_args()
         if args.subcommand == 'listen':
-            threads = []
+            processes = []
             for profile_path in args.profile_paths:
-                thread = threading.Thread(target=listen, args=[profile.create_from_yml(profile_path)])
-                thread.start()
-                threads.append(thread)
+                profile_obj = profile.create_from_yml(profile_path)
+                process = multiprocessing.Process(target=listen, args=(profile_obj,))
+                process.start()
+                processes.append(process)
 
-            for thread in threads:
-                thread.join()
+            for process in processes:
+                process.join()
 
         if args.subcommand == 'detect':
             detect(args)
