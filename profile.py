@@ -32,7 +32,7 @@ class Profile:
 def create_from_yml(filename: str) -> Profile:
     with open(filename, 'r') as file:
         profile = yaml.safe_load(file)
-        return Profile(profile['device'], profile['version'], KeyboardHandler(profile))
+        return Profile(profile['device'], profile.get('version', 1), KeyboardHandler(profile))
 
 
 def create_sample(device):
