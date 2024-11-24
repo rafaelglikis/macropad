@@ -22,6 +22,12 @@ class Profile:
     def dump(self) -> str:
         return yaml.dump(self.raw_data, sort_keys=False)
 
+    def __getstate__(self):
+        return self.__dict__.copy()
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
 
 def create_from_yml(filename: str) -> Profile:
     with open(filename, 'r') as file:

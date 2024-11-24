@@ -54,13 +54,17 @@ def detect() -> InputDevice:
         time.sleep(0.3)
 
 
-def listen(profile: Profile):
-    devices = _find_device(profile.device)
-    for device in devices:
-        device.grab()
-
-    while True:
+def listen(profile):
+    try:
+        devices = _find_device(profile.device)
         for device in devices:
-            e = device.read_one()
-            if e:
-                profile.handler.handle(e)
+            device.grab()
+
+        while True:
+            for device in devices:
+                e = device.read_one()
+                if e:
+                    profile.handler.handle(e)
+    except OSError as e:
+        if e.errno == 19:
+            print(f'Device {profile.device} lost')

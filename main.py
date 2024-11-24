@@ -33,11 +33,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
+    # Define processes as an empty list at the start
+    processes = []
     signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
     try:
         args = parse_args()
         if args.subcommand == 'listen':
-            processes = []
             for profile_path in args.profile_paths:
                 profile_obj = profile.create_from_yml(profile_path)
                 process = multiprocessing.Process(target=listen, args=(profile_obj,))
@@ -47,13 +48,19 @@ def main():
             for process in processes:
                 process.join()
 
-        if args.subcommand == 'detect':
+        elif args.subcommand == 'detect':
             detect(args)
     except KeyboardInterrupt:
         print('Keyboard interrupt. Exiting . . .')
+        for process in processes:
+            process.terminate()
+            process.join()
     except OSError as e:
         if e.errno == 19:
             print('Device lost. Exiting . . .')
+            for process in processes:
+                process.terminate()
+                process.join()
 
 
 def detect(args: argparse.Namespace):
