@@ -18,12 +18,6 @@ class Handler(Protocol):
         :param e:  Event to handle
         """
 
-    @property
-    def raw_data(self) -> dict:
-        """
-        :return: Raw data in dict format
-        """
-
 
 class KeyboardHandler:
     """
