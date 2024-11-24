@@ -9,7 +9,7 @@ import interceptor
 import profile
 import utils
 from interceptor import listen
-
+import threading
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
@@ -24,8 +24,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     listen_subparser = subparsers.add_parser('listen', help="Intercept profile device")
-    listen_subparser.add_argument('profile_path', help='Path to your macropad profile.')
-
+    listen_subparser.add_argument('profile_paths', nargs='+', help='Paths to your macropad profiles.')
     args = parser.parse_args()
     argcomplete.autocomplete(parser)
 
@@ -37,7 +36,15 @@ def main():
     try:
         args = parse_args()
         if args.subcommand == 'listen':
-            listen(profile.create_from_yml(args.profile_path))
+            threads = []
+            for profile_path in args.profile_paths:
+                thread = threading.Thread(target=listen, args=[profile.create_from_yml(profile_path)])
+                thread.start()
+                threads.append(thread)
+
+            for thread in threads:
+                thread.join()
+
         if args.subcommand == 'detect':
             detect(args)
     except KeyboardInterrupt:

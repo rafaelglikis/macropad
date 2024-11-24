@@ -55,7 +55,6 @@ class KeyboardHandler:
         else:
             self.handle_event(event, code, current_bindings)
 
-        print(self.active_layer, self.layer_used)
         if self.active_layer and self.layer_once and self.layer_used:
             self.deactivate_layer()
 
