@@ -27,6 +27,18 @@ class KeyboardHandler:
     def __init__(self, config):
         self.bindings = config['bindings']
         self.layers = config.get('layers', {})
+        for binding in self.bindings:
+            if 'layers' in self.bindings[binding]:
+                for layer in self.bindings[binding]['layers']:
+                    for b in self.bindings[binding]['layers'][layer]:
+                        if layer not in self.layers:
+                            self.layers[layer] = {}
+                        if 'bindings' not in self.layers[layer]:
+                            self.layers[layer]['bindings'] = {}
+                        if binding not in self.layers[layer]['bindings']:
+                            self.layers[layer]['bindings'][binding] = {}
+                        self.layers[layer]['bindings'][binding][b] = self.bindings[binding]['layers'][layer][b]
+
         self.active_layer = None
         self.layer_activation_key = None
         self.layer_used = False
