@@ -2,9 +2,4 @@
 tmp
 venv
 __pycache__/
-profile.yml
-profile.yml.bak
-profile2.yml
-profile3.yml
-scripts/
-keypad_profile.yml
+profiles/*
