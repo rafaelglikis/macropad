@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from typing import Protocol
 
 import evdev
@@ -111,12 +112,14 @@ class KeyboardHandler:
                 # self.notify("Executing", command)
                 utils.daemonize_and_run_command(command)
 
-    def activate_layer(self, layer_name, activation_key_code, once=False):
+    def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=5):
         if layer_name in self.layers:
             self.active_layer = layer_name
             self.layer_activation_key = activation_key_code
             self.layer_used = False
             self.layer_once = once
+            if once and deactivate_after > 0:
+                threading.Timer(deactivate_after, self.deactivate_layer).start()
             print(f"Layer '{layer_name}' activated {'(once)' if once else '(persistent)'}")
             self.notify("Layer Activated", f"Layer '{layer_name}' is now active")
         else:
