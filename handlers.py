@@ -63,6 +63,10 @@ class KeyboardHandler:
             return
 
         self.event_logs.append(event)
+        if isinstance(current_bindings[code], str) or isinstance(current_bindings[code], str):
+            current_bindings[code] = {
+                'up': current_bindings[code]
+            }
         if len(current_bindings[code].keys()) == 1 and 'hold' not in current_bindings[code]:
             self.handle_event_now(event, code, current_bindings)
         else:
