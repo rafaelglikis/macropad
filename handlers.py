@@ -95,7 +95,6 @@ class KeyboardHandler:
         current_key_bindings = current_bindings[code]
         event_value = self._map_event(event)
         only_has_key_for_down = len(current_key_bindings.keys()) == 1 and 'down' in current_key_bindings
-        print(current_key_bindings)
         if only_has_key_for_down and event_value == 'hold':
             event_value = 'down'
 
