@@ -8,7 +8,7 @@ from typing import List
 
 import argcomplete
 import notify2
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 import interceptor
@@ -17,6 +17,7 @@ import utils
 from interceptor import listen
 
 ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
+DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".config" / "macropad" / "profiles"
 
 class ProfileReloadHandler(FileSystemEventHandler):
     def __init__(self, reload_callback):
@@ -35,6 +36,28 @@ class ProfileReloadHandler(FileSystemEventHandler):
         self.last_reload = current_time
         print(f"Profile change detected: {event.src_path}")
         self.reload_callback()
+
+
+def ensure_default_config():
+    """Ensure default config directory exists with at least one sample profile."""
+    if not DEFAULT_CONFIG_DIR.exists():
+        DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"Created default config directory: {DEFAULT_CONFIG_DIR}")
+
+    yml_files = list(DEFAULT_CONFIG_DIR.glob('*.yml'))
+    if not yml_files:
+        sample_profile_path = DEFAULT_CONFIG_DIR / "sample_profile.yml"
+        sample_yml = """device: "Sample Device"
+version: '1'
+bindings:
+  KEY_UP:
+    up:
+      - notify-send 'Macropad' 'Welcome! Edit this profile in ~/.config/macropad/profiles/'
+"""
+        sample_profile_path.write_text(sample_yml)
+        print(f"Created sample profile: {sample_profile_path}")
+        print(f"Edit your profiles in: {DEFAULT_CONFIG_DIR}")
+        print("Run 'macropad detect --generate-profile' to create a profile for your device.")
 
 
 def get_profile_paths(args: argparse.Namespace) -> List[str]:
@@ -144,19 +167,27 @@ def main():
         args = parse_args()
         if args.subcommand == 'listen':
             notify2.init('Macropad')
+
+            using_default_config = False
+            if not args.profile_paths and not args.profile_directories:
+                ensure_default_config()
+                args.profile_directories = [str(DEFAULT_CONFIG_DIR)]
+                using_default_config = True
+
             all_profile_paths = get_profile_paths(args)
 
             if not all_profile_paths:
-                print("Error: No profile paths or directories specified.")
+                print("Error: No profile files found. Please add profile files to your directories.")
                 return
 
             processes = start_profile_processes(all_profile_paths)
 
-            if args.watch:
+            enable_watch = args.watch or using_default_config
+            if enable_watch:
                 if not args.profile_directories:
                     print("Warning: --watch flag requires --directory to be specified. Watch mode disabled.")
                 else:
-                    observer = Observer()
+                    observer = PollingObserver()
                     event_handler = ProfileReloadHandler(reload_profiles)
 
                     for directory in args.profile_directories:
@@ -167,7 +198,7 @@ def main():
 
                     try:
                         observer.start()
-                        print("Watch mode enabled. Profiles will auto-reload on changes.")
+                        print("Watch mode enabled. Profiles will auto-reload on changes (including symlinks).")
                     except Exception as e:
                         print(f"Error starting observer: {e}")
                         observer = None
@@ -211,15 +242,15 @@ def detect(args: argparse.Namespace):
     print(profile_yml)
     print('-------------------------------')
 
-    filename = 'profile.yml'
+    ensure_default_config()
+    filename = DEFAULT_CONFIG_DIR / 'profile.yml'
     counter = 0
-    while pathlib.Path(filename).exists():
+    while filename.exists():
         counter += 1
-        filename = f"profile_{counter}.yml"
+        filename = DEFAULT_CONFIG_DIR / f"profile_{counter}.yml"
 
-    with open(filename, 'w') as file:
-        file.write(profile_yml)
-        print(f'Sample profile generated on {filename}')
+    filename.write_text(profile_yml)
+    print(f'Sample profile generated in {filename}')
 
 
 if __name__ == '__main__':
