@@ -16,6 +16,7 @@ import profile
 import utils
 from interceptor import listen
 
+ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
 
 class ProfileReloadHandler(FileSystemEventHandler):
     def __init__(self, reload_callback):
@@ -108,13 +109,18 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def send_notification(title: str, message: str):
+def send_notification(title: str, message: str, icon_path: str = None):
     """Send a desktop notification, gracefully handling errors."""
     try:
-        notification = notify2.Notification(title, message)
+        notification = notify2.Notification(
+            summary=title,
+            message=message,
+            icon=f"{ASSETS_DIR}/macropad.svg",
+        )
         notification.show()
     except Exception as e:
         print(f"Notification error: {e}")
+
 
 def main():
     processes = []
@@ -131,7 +137,7 @@ def main():
 
         send_notification(
             title="Macropad Configuration Updated",
-            message=f"Successfully reloaded {len(processes)} profile(s)"
+            message=f"Successfully reloaded {len(processes)} profile(s)",
         )
 
     try:
