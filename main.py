@@ -14,10 +14,7 @@ from watchdog.events import FileSystemEventHandler, FileSystemEvent
 import interceptor
 import profile
 import utils
-from interceptor import listen
-
-ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
-DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".config" / "macropad" / "profiles"
+from utils import DEFAULT_CONFIG_DIR
 
 class ProfileReloadHandler(FileSystemEventHandler):
     def __init__(self, reload_callback):
@@ -84,7 +81,7 @@ def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Pr
     for profile_path in profile_paths:
         try:
             profile_obj = profile.create_from_yml(profile_path)
-            process = multiprocessing.Process(target=listen, args=(profile_obj,))
+            process = multiprocessing.Process(target=interceptor.listen, args=(profile_obj,))
             process.start()
             processes.append(process)
             print(f"Started profile: {profile_path}")
@@ -132,19 +129,6 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def send_notification(title: str, message: str, icon_path: str = None):
-    """Send a desktop notification, gracefully handling errors."""
-    try:
-        notification = notify2.Notification(
-            summary=title,
-            message=message,
-            icon=f"{ASSETS_DIR}/macropad.svg",
-        )
-        notification.show()
-    except Exception as e:
-        print(f"Notification error: {e}")
-
-
 def main():
     processes = []
     signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
@@ -158,7 +142,7 @@ def main():
         processes = start_profile_processes(profile_paths)
         print(f"Reloaded {len(processes)} profile(s)")
 
-        send_notification(
+        utils.send_notification(
             title="Macropad Configuration Updated",
             message=f"Successfully reloaded {len(processes)} profile(s)",
         )

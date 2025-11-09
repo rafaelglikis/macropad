@@ -1,7 +1,5 @@
 import time
 
-from profile import Profile
-
 import evdev
 from evdev import InputDevice
 

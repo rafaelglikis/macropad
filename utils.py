@@ -1,9 +1,15 @@
 import os
+import pathlib
 import resource
 import subprocess
 import sys
 import threading
 
+import notify2
+
+
+ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
+DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".config" / "macropad" / "profiles"
 
 def reap_zombie_processes(signum, frame):
     while True:
@@ -95,3 +101,16 @@ def daemonize_and_run_command(command: str) -> None:
         print(f"Failed to execute command: {e}", file=sys.stderr)
 
     sys.exit(0)
+
+
+def send_notification(title: str, message: str, icon_path: str = None):
+    """Send a desktop notification, gracefully handling errors."""
+    try:
+        notification = notify2.Notification(
+            summary=title,
+            message=message,
+            icon=f"{ASSETS_DIR}/macropad.svg",
+        )
+        notification.show()
+    except Exception as e:
+        print(f"Notification error: {e}")

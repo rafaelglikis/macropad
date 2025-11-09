@@ -112,7 +112,6 @@ class KeyboardHandler:
                 self.execute_handler_command(command[1:], code)
             else:
                 print(f"Executing command '{command}' for '{event_value}' on {event}")
-                # self.notify("Executing", command)
                 utils.daemonize_and_run_command(command)
 
     def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=5):
@@ -124,7 +123,7 @@ class KeyboardHandler:
             if once and deactivate_after > 0:
                 threading.Timer(deactivate_after, self.deactivate_layer).start()
             print(f"Layer '{layer_name}' activated {'(once)' if once else '(persistent)'}")
-            self.notify("Layer Activated", f"Layer '{layer_name}' is now active")
+            utils.send_notification("Layer Activated", f"Layer '{layer_name}' is now active")
         else:
             print(f"Layer '{layer_name}' not found")
 
@@ -136,9 +135,9 @@ class KeyboardHandler:
         self.layer_once = False
         print(f"Layer '{layer}' deactivated")
         if layer:
-            self.notify("Layer Deactivated", f"Layer '{layer}' is now deactivated")
+            utils.send_notification("Layer Deactivated", f"Layer '{layer}' is now deactivated")
         else:
-            self.notify("Layer Deactivated", "No layer was active")
+            utils.send_notification("Layer Deactivated", "No layer was active")
 
     def _map_event(self, e: KeyEvent) -> str:
         if self._is_hold_event(e):
@@ -177,11 +176,6 @@ class KeyboardHandler:
                 return False
         return True
 
-    def notify(self, title: str, message, *, expire_seconds: float = 3) -> None:
-        if not self.notifications:
-            return
-
-        subprocess.call(['notify-send', title, message, '-t', str(expire_seconds * 1000)])
 
     def execute_handler_command(self, command, code):
         command_with_args = command.split(' ')
