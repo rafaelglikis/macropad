@@ -25,7 +25,13 @@ def parse_args() -> argparse.Namespace:
     )
 
     listen_subparser = subparsers.add_parser('listen', help="Intercept profile device")
-    listen_subparser.add_argument('profile_paths', nargs='+', help='Paths to your macropad profiles.')
+    listen_subparser.add_argument('profile_paths', nargs='*', help='Paths to your macropad profiles.')
+    listen_subparser.add_argument(
+        '--directory', '-d',
+        action='append',
+        dest='profile_directories',
+        help='Directory containing profile files (.yml). Can be specified multiple times.',
+    )
     args = parser.parse_args()
     argcomplete.autocomplete(parser)
 
@@ -33,13 +39,31 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
-    # Define processes as an empty list at the start
     processes = []
     signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
     try:
         args = parse_args()
         if args.subcommand == 'listen':
-            for profile_path in args.profile_paths:
+            all_profile_paths = list(args.profile_paths) if args.profile_paths else []
+
+            if args.profile_directories:
+                for directory in args.profile_directories:
+                    dir_path = pathlib.Path(directory)
+                    if not dir_path.exists():
+                        print(f"Warning: Directory '{directory}' does not exist. Skipping...")
+                        continue
+                    if not dir_path.is_dir():
+                        print(f"Warning: '{directory}' is not a directory. Skipping...")
+                        continue
+
+                    yml_files = sorted(dir_path.glob('*.yml'))
+                    all_profile_paths.extend(str(f) for f in yml_files)
+
+            if not all_profile_paths:
+                print("Error: No profile paths or directories specified.")
+                return
+
+            for profile_path in all_profile_paths:
                 profile_obj = profile.create_from_yml(profile_path)
                 process = multiprocessing.Process(target=listen, args=(profile_obj,))
                 process.start()
