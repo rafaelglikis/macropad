@@ -78,15 +78,27 @@ def get_profile_paths(args: argparse.Namespace) -> List[str]:
 
 def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Process]:
     processes = []
+    profiles_by_device = {}
+
     for profile_path in profile_paths:
         try:
-            profile_obj = profile.create_from_yml(profile_path)
+            profile_data = profile.load_yml(profile_path)
+            profiles_by_device.setdefault(profile_data['device'], []).append((profile_path, profile_data))
+        except Exception as e:
+            print(f"Error loading profile {profile_path}: {e}")
+
+    for device, profile_fragments in profiles_by_device.items():
+        try:
+            profile_paths_for_device = [profile_path for profile_path, _ in profile_fragments]
+            profile_obj = profile.create_from_data(
+                profile.merge_data([profile_data for _, profile_data in profile_fragments])
+            )
             process = multiprocessing.Process(target=interceptor.listen, args=(profile_obj,))
             process.start()
             processes.append(process)
-            print(f"Started profile: {profile_path}")
+            print(f"Started profile for {device}: {', '.join(profile_paths_for_device)}")
         except Exception as e:
-            print(f"Error loading profile {profile_path}: {e}")
+            print(f"Error loading profiles for {device}: {e}")
     return processes
 
 

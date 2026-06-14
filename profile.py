@@ -30,9 +30,56 @@ class Profile:
 
 
 def create_from_yml(filename: str) -> Profile:
+    return create_from_data(load_yml(filename))
+
+
+def load_yml(filename: str) -> dict:
     with open(filename, 'r') as file:
-        profile = yaml.safe_load(file)
-        return Profile(profile['device'], profile.get('version', 1), KeyboardHandler(profile))
+        return yaml.safe_load(file)
+
+
+def create_from_data(profile_data: dict) -> Profile:
+    return Profile(profile_data['device'], profile_data.get('version', 1), KeyboardHandler(profile_data))
+
+
+def merge_data(profile_datas: list[dict]) -> dict:
+    if not profile_datas:
+        raise ValueError("No profile data to merge")
+
+    device = profile_datas[0]['device']
+    merged = {
+        'device': device,
+        'version': profile_datas[0].get('version', 1),
+        'bindings': {},
+        'layers': {},
+    }
+
+    for profile_data in profile_datas:
+        if profile_data['device'] != device:
+            raise ValueError("Cannot merge profiles for different devices")
+
+        merged['notifications'] = merged.get('notifications', False) or profile_data.get('notifications', False)
+        merged['dry_run'] = merged.get('dry_run', False) or profile_data.get('dry_run', False)
+        _merge_mapping(merged['bindings'], profile_data.get('bindings', {}), 'bindings')
+        _merge_mapping(merged['layers'], profile_data.get('layers', {}), 'layers')
+
+    return merged
+
+
+def _merge_mapping(target: dict, source: dict, context: str) -> None:
+    for key, value in source.items():
+        if key not in target:
+            target[key] = value
+            continue
+
+        if isinstance(target[key], dict) and isinstance(value, dict):
+            _merge_mapping(target[key], value, f"{context}.{key}")
+            continue
+
+        if target[key] == value:
+            continue
+
+        raise ValueError(f"Duplicate conflicting profile entry: {context}.{key}")
 
 
 def create_sample(device):
