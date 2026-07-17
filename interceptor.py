@@ -19,6 +19,20 @@ def _find_device(device_id: str) -> list[InputDevice]:
     return devices_to_return
 
 
+def has_device(device_id: str) -> bool:
+    for path in evdev.list_devices():
+        device = InputDevice(path)
+        try:
+            matches = device.name == device_id or device.path == device_id
+        finally:
+            device.close()
+
+        if matches:
+            return True
+
+    return False
+
+
 def print_device_info(device: InputDevice):
     print(f"Using Device: {device.name} | Path: {device.path} | Info: {device.info}")
 

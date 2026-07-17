@@ -93,6 +93,10 @@ def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Pr
             profile_obj = profile.create_from_data(
                 profile.merge_data([profile_data for _, profile_data in profile_fragments])
             )
+            if not interceptor.has_device(profile_obj.device):
+                print(f"Warning: Device not connected for {device}: {', '.join(profile_paths_for_device)}. Skipping...")
+                continue
+
             process = multiprocessing.Process(target=interceptor.listen, args=(profile_obj,))
             process.start()
             processes.append(process)
