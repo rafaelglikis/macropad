@@ -19,6 +19,24 @@ def _find_device(device_id: str) -> list[InputDevice]:
     return devices_to_return
 
 
+def _matching_device_paths(device_id: str) -> list[str]:
+    matching_paths = []
+
+    for path in evdev.list_devices():
+        try:
+            device = InputDevice(path)
+        except OSError:
+            continue
+
+        try:
+            if device.name == device_id or device.path == device_id:
+                matching_paths.append(path)
+        finally:
+            device.close()
+
+    return matching_paths
+
+
 def has_device(device_id: str) -> bool:
     for path in evdev.list_devices():
         device = InputDevice(path)
@@ -62,16 +80,45 @@ def detect() -> InputDevice:
 
 
 def listen(profile):
-    try:
-        devices = _find_device(profile.device)
-        for device in devices:
-            device.grab()
+    devices = {}
+    last_scan = 0
 
+    try:
         while True:
-            for device in devices:
-                e = device.read_one()
-                if e:
-                    profile.handler.handle(e)
-    except OSError as e:
-        if e.errno == 19:
-            print(f'Device {profile.device} lost')
+            current_time = time.time()
+            if current_time - last_scan >= 0.3:
+                last_scan = current_time
+
+                for path in _matching_device_paths(profile.device):
+                    if path in devices:
+                        continue
+
+                    device = None
+                    try:
+                        device = InputDevice(path)
+                        print_device_info(device)
+                        device.grab()
+                    except OSError as e:
+                        if device:
+                            device.close()
+                        if e.errno != 19:
+                            raise
+                        continue
+                    devices[path] = device
+
+            for path, device in list(devices.items()):
+                try:
+                    e = device.read_one()
+                    if e:
+                        profile.handler.handle(e)
+                except OSError as e:
+                    if e.errno != 19:
+                        raise
+                    print(f'Device {profile.device} lost: {path}')
+                    device.close()
+                    del devices[path]
+
+            time.sleep(0.01)
+    finally:
+        for device in devices.values():
+            device.close()
