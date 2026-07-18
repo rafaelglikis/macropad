@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Return nonzero CLI exit codes for startup and configuration failures.
+Add clean-wheel coverage for the console and module entry points and packaged assets.
 
 ### Phase 2, Increment 1: Completed
 
@@ -124,6 +124,14 @@ Return nonzero CLI exit codes for startup and configuration failures.
 - Propagate the device name into keyboard handlers and action executors without breaking profile pickling.
 - Record the decision to keep trusted shell strings as the only supported action format.
 - Verification: sixty-seven tests pass, all Python files compile, the live journal contains contextual records from the CLI, supervisor, and device workers, and regression coverage verifies INFO-level device, key, event, and command context.
+
+### Phase 3, Increment 3: Completed
+
+- Return status one when no profiles are found, profile validation or worker startup fails, requested watch setup is unavailable or fails, or an unexpected operating-system error occurs.
+- Preserve status zero for graceful listen shutdown, keyboard interruption, successful detection, and expected input-device loss.
+- Propagate `main()` status through direct CLI and `python -m macropad` execution; packaged console scripts already apply `sys.exit()` to the return value.
+- Preserve argparse's status two for invalid command-line usage.
+- Verification: seventy-six tests pass, all Python files compile, the patch has no whitespace errors, and both installed entry points return status one for a missing profile directory.
 
 ### Package Structure Migration: Completed
 
@@ -236,7 +244,7 @@ Control subprocess concurrency, logging, completion, and shutdown. Trusted shell
 1. [x] Add a bounded action executor that tracks subprocesses and logs exit status.
 2. Declined: keep trusted shell-string actions and do not add argument-array actions.
 3. [x] Use Python logging with device, profile, key, and worker context.
-4. Return nonzero exit codes for startup and configuration failures.
+4. [x] Return nonzero exit codes for startup and configuration failures.
 5. Add a real `[project.scripts]` entry point and a checked-in systemd unit template.
 6. [x] Remove or repair `watch.sh` and align the Makefile target names.
 

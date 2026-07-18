@@ -1,5 +1,6 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
+import errno
 import logging
 import pathlib
 import queue
@@ -168,7 +169,7 @@ def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
     signal.signal(signal.SIGTERM, request_shutdown)
 
 
-def main():
+def main() -> int:
     configure_logging()
     observer = None
     reload_requests = queue.SimpleQueue()
@@ -191,7 +192,23 @@ def main():
 
             if not all_profile_paths:
                 logger.error('no profile files found')
-                return
+                return 1
+
+            enable_watch = args.watch or using_default_config
+            watch_directories = []
+            if enable_watch:
+                if not args.profile_directories:
+                    logger.error('watch mode requires a profile directory')
+                    return 1
+
+                for directory in args.profile_directories:
+                    dir_path = pathlib.Path(directory)
+                    if dir_path.exists() and dir_path.is_dir():
+                        watch_directories.append(dir_path)
+
+                if not watch_directories:
+                    logger.error('no valid profile directories to watch')
+                    return 1
 
             try:
                 profile_supervisor.start(all_profile_paths)
@@ -200,31 +217,25 @@ def main():
                     'failed to load profiles',
                     extra={'profiles': tuple(all_profile_paths), 'error': str(error)},
                 )
-                return
+                return 1
 
-            enable_watch = args.watch or using_default_config
             if enable_watch:
-                if not args.profile_directories:
-                    logger.warning('watch mode requires a profile directory; disabled')
-                else:
-                    observer = PollingObserver()
-                    event_handler = ProfileReloadHandler(reload_requests)
+                observer = PollingObserver()
+                event_handler = ProfileReloadHandler(reload_requests)
 
-                    for directory in args.profile_directories:
-                        dir_path = pathlib.Path(directory)
-                        if dir_path.exists() and dir_path.is_dir():
-                            observer.schedule(event_handler, str(dir_path), recursive=False)
-                            logger.info('watching profile directory', extra={'path': str(dir_path)})
+                for directory in watch_directories:
+                    observer.schedule(event_handler, str(directory), recursive=False)
+                    logger.info('watching profile directory', extra={'path': str(directory)})
 
-                    try:
-                        observer.start()
-                        logger.info('profile watch mode enabled')
-                    except Exception as e:
-                        logger.error(
-                            'failed to start profile observer',
-                            extra={'error': str(e)},
-                        )
-                        observer = None
+                try:
+                    observer.start()
+                    logger.info('profile watch mode enabled')
+                except Exception as e:
+                    logger.error(
+                        'failed to start profile observer',
+                        extra={'error': str(e)},
+                    )
+                    return 1
 
             try:
                 while not shutdown_requested.wait(1):
@@ -236,14 +247,19 @@ def main():
             detect(args)
     except KeyboardInterrupt:
         logger.info('keyboard interrupt received; exiting')
-    except OSError as e:
-        if e.errno == 19:
-            logger.warning('input device lost; exiting', extra={'error': str(e)})
+    except OSError as error:
+        if error.errno == errno.ENODEV:
+            logger.warning('input device lost; exiting', extra={'error': str(error)})
+        else:
+            logger.exception('operating system error; exiting', extra={'error': str(error)})
+            return 1
     finally:
         if observer and observer.is_alive():
             observer.stop()
             observer.join()
         profile_supervisor.shutdown()
+
+    return 0
 
 
 def detect(args: argparse.Namespace):
@@ -268,4 +284,4 @@ def detect(args: argparse.Namespace):
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

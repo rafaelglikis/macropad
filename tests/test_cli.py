@@ -1,4 +1,6 @@
+import errno
 import queue
+import runpy
 import signal
 import threading
 import unittest
@@ -88,11 +90,188 @@ class ShutdownSignalTests(unittest.TestCase):
                 patch('macropad.cli.detect') as detect,
                 patch('macropad.cli.install_shutdown_handler') as install_shutdown,
         ):
-            cli.main()
+            exit_status = cli.main()
 
+        self.assertEqual(0, exit_status)
         detect.assert_called_once_with(args)
         configure_logging.assert_called_once_with()
         install_shutdown.assert_not_called()
+
+
+class MainExitStatusTests(unittest.TestCase):
+    def test_missing_profiles_return_failure(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=[],
+            profile_directories=['/profiles'],
+            watch=False,
+        )
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.get_profile_paths', return_value=[]),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.start.assert_not_called()
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_invalid_startup_configuration_returns_failure(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=['/profiles/invalid.yml'],
+            profile_directories=None,
+            watch=False,
+        )
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            supervisor_type.return_value.start.side_effect = ValueError('invalid binding')
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_requested_watch_failure_returns_failure(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=['/profiles/macros.yml'],
+            profile_directories=['.'],
+            watch=True,
+        )
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+                patch('macropad.cli.PollingObserver') as observer_type,
+        ):
+            observer_type.return_value.start.side_effect = RuntimeError('observer failed')
+            observer_type.return_value.is_alive.return_value = False
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_watch_without_directories_returns_failure_before_starting_workers(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=['/profiles/macros.yml'],
+            profile_directories=None,
+            watch=True,
+        )
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.start.assert_not_called()
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_watch_without_valid_directories_returns_failure_before_starting_workers(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=['/profiles/macros.yml'],
+            profile_directories=['/profiles/missing'],
+            watch=True,
+        )
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.get_profile_paths', return_value=args.profile_paths),
+                patch('macropad.cli.pathlib.Path') as path_type,
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            path_type.return_value.exists.return_value = False
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.start.assert_not_called()
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_graceful_listen_shutdown_returns_success(self):
+        args = SimpleNamespace(
+            subcommand='listen',
+            profile_paths=['/profiles/macros.yml'],
+            profile_directories=None,
+            watch=False,
+        )
+        shutdown_requested = Mock()
+        shutdown_requested.wait.return_value = True
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.notify2.init'),
+                patch('macropad.cli.install_shutdown_handler'),
+                patch('macropad.cli.threading.Event', return_value=shutdown_requested),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(0, exit_status)
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_unexpected_os_error_returns_failure(self):
+        args = SimpleNamespace(subcommand='detect')
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.detect', side_effect=OSError(5, 'input/output error')),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(1, exit_status)
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_lost_input_device_returns_success(self):
+        args = SimpleNamespace(subcommand='detect')
+
+        with (
+                patch('macropad.cli.configure_logging'),
+                patch('macropad.cli.parse_args', return_value=args),
+                patch(
+                    'macropad.cli.detect',
+                    side_effect=OSError(errno.ENODEV, 'no such device'),
+                ),
+                patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(0, exit_status)
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_module_entry_point_propagates_main_status(self):
+        with (
+                patch('macropad.cli.main', return_value=7),
+                self.assertRaises(SystemExit) as raised,
+        ):
+            runpy.run_module('macropad', run_name='__main__')
+
+        self.assertEqual(7, raised.exception.code)
 
 
 if __name__ == '__main__':
