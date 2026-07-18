@@ -1,5 +1,6 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
+import logging
 import pathlib
 import queue
 import signal
@@ -13,8 +14,12 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from . import interceptor, profiles, utils
+from .logging_config import configure_logging
 from .supervisor import ProfileSupervisor
 from .utils import DEFAULT_CONFIG_DIR
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProfileReloadHandler(FileSystemEventHandler):
@@ -48,7 +53,10 @@ def ensure_default_config():
     """Ensure default config directory exists with at least one sample profile."""
     if not DEFAULT_CONFIG_DIR.exists():
         DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        print(f"Created default config directory: {DEFAULT_CONFIG_DIR}")
+        logger.info(
+            'default configuration directory created',
+            extra={'path': str(DEFAULT_CONFIG_DIR)},
+        )
 
     yml_files = list(DEFAULT_CONFIG_DIR.glob('*.yml'))
     if not yml_files:
@@ -61,9 +69,9 @@ bindings:
       - notify-send 'Macropad' 'Welcome! Edit this profile in ~/.config/macropad/profiles/'
 """
         sample_profile_path.write_text(sample_yml)
-        print(f"Created sample profile: {sample_profile_path}")
-        print(f"Edit your profiles in: {DEFAULT_CONFIG_DIR}")
-        print("Run 'macropad detect --generate-profile' to create a profile for your device.")
+        logger.info('sample profile created', extra={'path': str(sample_profile_path)})
+        logger.info('edit profiles in configuration directory', extra={'path': str(DEFAULT_CONFIG_DIR)})
+        logger.info("run 'macropad detect --generate-profile' to create a device profile")
 
 
 def get_profile_paths(args: argparse.Namespace) -> List[str]:
@@ -73,10 +81,10 @@ def get_profile_paths(args: argparse.Namespace) -> List[str]:
         for directory in args.profile_directories:
             dir_path = pathlib.Path(directory)
             if not dir_path.exists():
-                print(f"Warning: Directory '{directory}' does not exist. Skipping...")
+                logger.warning('profile directory does not exist; skipping', extra={'path': directory})
                 continue
             if not dir_path.is_dir():
-                print(f"Warning: '{directory}' is not a directory. Skipping...")
+                logger.warning('profile path is not a directory; skipping', extra={'path': directory})
                 continue
 
             yml_files = sorted(dir_path.glob('*.yml'))
@@ -117,12 +125,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namespace) -> bool:
-    print("Reloading profiles...")
+    logger.info('reloading profiles')
     profile_paths = get_profile_paths(args)
     try:
         profile_supervisor.reload(profile_paths)
     except Exception as error:
-        print(f"Reload aborted: {error}")
+        logger.error(
+            'profile reload failed',
+            extra={'profiles': tuple(profile_paths), 'error': str(error)},
+        )
         utils.send_notification(
             title="Macropad Configuration Error",
             message=f"Configuration reload failed: {error}",
@@ -130,7 +141,7 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
         return False
 
     worker_count = len(profile_supervisor.workers)
-    print(f"Reloaded {worker_count} profile(s)")
+    logger.info('profiles reloaded', extra={'count': worker_count})
     utils.send_notification(
         title="Macropad Configuration Updated",
         message=f"Successfully reloaded {worker_count} profile(s)",
@@ -145,7 +156,7 @@ def run_supervision_cycle(
 ) -> None:
     changed_paths = drain_reload_requests(reload_requests)
     if changed_paths:
-        print(f"Profile changes detected: {', '.join(changed_paths)}")
+        logger.info('profile changes detected', extra={'profiles': tuple(changed_paths)})
         reload_profiles(profile_supervisor, args)
     profile_supervisor.tick()
 
@@ -158,6 +169,7 @@ def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
 
 
 def main():
+    configure_logging()
     observer = None
     reload_requests = queue.SimpleQueue()
     profile_supervisor = ProfileSupervisor()
@@ -178,19 +190,22 @@ def main():
             all_profile_paths = get_profile_paths(args)
 
             if not all_profile_paths:
-                print("Error: No profile files found. Please add profile files to your directories.")
+                logger.error('no profile files found')
                 return
 
             try:
                 profile_supervisor.start(all_profile_paths)
             except Exception as error:
-                print(f"Error loading profiles: {error}")
+                logger.error(
+                    'failed to load profiles',
+                    extra={'profiles': tuple(all_profile_paths), 'error': str(error)},
+                )
                 return
 
             enable_watch = args.watch or using_default_config
             if enable_watch:
                 if not args.profile_directories:
-                    print("Warning: --watch flag requires --directory to be specified. Watch mode disabled.")
+                    logger.warning('watch mode requires a profile directory; disabled')
                 else:
                     observer = PollingObserver()
                     event_handler = ProfileReloadHandler(reload_requests)
@@ -199,13 +214,16 @@ def main():
                         dir_path = pathlib.Path(directory)
                         if dir_path.exists() and dir_path.is_dir():
                             observer.schedule(event_handler, str(dir_path), recursive=False)
-                            print(f"Watching directory: {dir_path}")
+                            logger.info('watching profile directory', extra={'path': str(dir_path)})
 
                     try:
                         observer.start()
-                        print("Watch mode enabled. Profiles will auto-reload on changes (including symlinks).")
+                        logger.info('profile watch mode enabled')
                     except Exception as e:
-                        print(f"Error starting observer: {e}")
+                        logger.error(
+                            'failed to start profile observer',
+                            extra={'error': str(e)},
+                        )
                         observer = None
 
             try:
@@ -217,10 +235,10 @@ def main():
         elif args.subcommand == 'detect':
             detect(args)
     except KeyboardInterrupt:
-        print('Keyboard interrupt. Exiting . . .')
+        logger.info('keyboard interrupt received; exiting')
     except OSError as e:
         if e.errno == 19:
-            print('Device lost. Exiting . . .')
+            logger.warning('input device lost; exiting', extra={'error': str(e)})
     finally:
         if observer and observer.is_alive():
             observer.stop()
@@ -246,7 +264,7 @@ def detect(args: argparse.Namespace):
         filename = DEFAULT_CONFIG_DIR / f"profile_{counter}.yml"
 
     filename.write_text(profile_yml)
-    print(f'Sample profile generated in {filename}')
+    logger.info('sample profile generated', extra={'path': str(filename)})
 
 
 if __name__ == '__main__':

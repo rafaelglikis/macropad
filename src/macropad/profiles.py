@@ -321,7 +321,7 @@ def _merge_binding(
 def create_from_data(profile_data: ProfileConfig) -> Profile:
     return Profile(
         config=profile_data,
-        handler=KeyboardHandler(profile_data.keyboard),
+        handler=KeyboardHandler(profile_data.keyboard, device=profile_data.device),
     )
 
 

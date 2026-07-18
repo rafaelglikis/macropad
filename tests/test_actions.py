@@ -1,6 +1,6 @@
 import subprocess
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 from macropad.actions import ActionExecutor
 
@@ -35,14 +35,15 @@ class ActionExecutorTests(unittest.TestCase):
 
         self.assertTrue(executor.submit('first-command'))
         self.assertTrue(executor.submit('second-command'))
-        with patch('builtins.print') as print_message:
+        with patch('macropad.actions.logger') as logger:
             submitted = executor.submit('rejected-command')
 
         self.assertFalse(submitted)
         self.assertEqual(2, executor.active_count)
         self.assertEqual(2, process_factory.call_count)
-        print_message.assert_called_once_with(
-            'Action limit reached (2); skipping command: rejected-command'
+        logger.warning.assert_called_once_with(
+            'action rejected at concurrency limit',
+            extra={'command': 'rejected-command', 'limit': 2},
         )
 
     def test_tick_reaps_commands_and_reports_exit_status(self):
@@ -62,16 +63,27 @@ class ActionExecutorTests(unittest.TestCase):
         successful_process.poll.return_value = 0
         failed_process.poll.return_value = 7
 
-        with patch('builtins.print') as print_message:
+        successful_process.pid = 100
+        failed_process.pid = 101
+        with patch('macropad.actions.logger') as logger:
             executor.tick()
 
         self.assertEqual(1, executor.active_count)
-        self.assertEqual(
-            [
-                call('Command exited with status 0: successful-command'),
-                call('Command exited with status 7: failed-command'),
-            ],
-            print_message.call_args_list,
+        logger.info.assert_called_once_with(
+            'action exited',
+            extra={
+                'command': 'successful-command',
+                'pid': 100,
+                'exit_status': 0,
+            },
+        )
+        logger.warning.assert_called_once_with(
+            'action exited',
+            extra={
+                'command': 'failed-command',
+                'pid': 101,
+                'exit_status': 7,
+            },
         )
 
     def test_submit_reports_process_start_failure(self):
@@ -79,13 +91,17 @@ class ActionExecutorTests(unittest.TestCase):
             process_factory=Mock(side_effect=OSError('cannot start process'))
         )
 
-        with patch('builtins.print') as print_message:
+        with patch('macropad.actions.logger') as logger:
             submitted = executor.submit('broken-command')
 
         self.assertFalse(submitted)
         self.assertEqual(0, executor.active_count)
-        print_message.assert_called_once_with(
-            'Failed to execute command: cannot start process'
+        logger.error.assert_called_once_with(
+            'action failed to start',
+            extra={
+                'command': 'broken-command',
+                'error': 'cannot start process',
+            },
         )
 
     def test_shutdown_detaches_running_commands(self):
@@ -94,12 +110,13 @@ class ActionExecutorTests(unittest.TestCase):
         executor = ActionExecutor(process_factory=Mock(return_value=process))
         executor.submit('long-command')
 
-        with patch('builtins.print') as print_message:
+        with patch('macropad.actions.logger') as logger:
             executor.shutdown()
 
         self.assertEqual(0, executor.active_count)
-        print_message.assert_called_once_with(
-            'Detaching 1 running action(s) during worker shutdown'
+        logger.info.assert_called_once_with(
+            'detaching running actions during worker shutdown',
+            extra={'count': 1},
         )
 
 

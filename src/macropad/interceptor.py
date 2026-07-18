@@ -1,8 +1,12 @@
+import logging
 import signal
 import time
 
 import evdev
 from evdev import InputDevice
+
+logger = logging.getLogger(__name__)
+
 
 def install_shutdown_handler(shutdown_event) -> None:
     def request_shutdown(signum, frame):
@@ -44,24 +48,31 @@ def has_device(device_name: str) -> bool:
 
 
 def print_device_info(device: InputDevice):
-    print(f"Using Device: {device.name} | Path: {device.path} | Info: {device.info}")
+    logger.info(
+        'input device opened',
+        extra={
+            'device': device.name,
+            'device_info': str(device.info),
+            'path': device.path,
+        },
+    )
 
 
 def detect() -> InputDevice:
     initial_devices = evdev.list_devices()
     devices = evdev.list_devices()
 
-    print('Detecting new devices, please connect your device.')
+    logger.info('detecting new input device')
     while True:
         if len(devices) > len(initial_devices):
             break
         time.sleep(0.3)
         initial_devices, devices = devices, evdev.list_devices()
 
-    print('New devices detected!')
+    logger.info('new input device detected')
     new_devices = list(set(devices) - set(initial_devices))
 
-    print('Press and hold any key on your device.')
+    logger.info('waiting for key press on new input device')
     while True:
         for device_path in new_devices:
             device = InputDevice(device_path)
@@ -105,7 +116,10 @@ def listen(profile, shutdown_event):
                 except OSError as e:
                     if e.errno != 19:
                         raise
-                    print(f'Device {profile.device} lost: {path}')
+                    logger.warning(
+                        'input device lost',
+                        extra={'device': profile.device, 'path': path},
+                    )
                     device.close()
                     del devices[path]
 

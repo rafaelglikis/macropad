@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Preserve trusted shell-string actions and support explicit argument-array actions.
+Return nonzero CLI exit codes for startup and configuration failures.
 
 ### Phase 2, Increment 1: Completed
 
@@ -116,6 +116,15 @@ Preserve trusted shell-string actions and support explicit argument-array action
 - Remove process-global command tracking from `utils.py` and listener-level command cleanup.
 - Verification: sixty-three tests pass, all Python files compile, the active service runs three workers, and a real shell command reports its nonzero exit status.
 
+### Phase 3, Increment 2: Completed
+
+- Configure standard Python logging once at the CLI boundary with stable contextual formatting.
+- Replace runtime `print()` calls with debug, info, warning, and error records while preserving generated profile YAML on stdout.
+- Include device, profile paths, input path, hardware information, key, event, command, process, exit status, retry, layer, and mode context where available.
+- Propagate the device name into keyboard handlers and action executors without breaking profile pickling.
+- Record the decision to keep trusted shell strings as the only supported action format.
+- Verification: sixty-seven tests pass, all Python files compile, the live journal contains contextual records from the CLI, supervisor, and device workers, and regression coverage verifies INFO-level device, key, event, and command context.
+
 ### Package Structure Migration: Completed
 
 - Moved application modules into the `src/macropad` package.
@@ -132,6 +141,7 @@ CLI -> Supervisor -> YAML profiles -> process per device -> evdev grab
                   -> keyboard handler -> bounded action executor -> detached shell commands
 
 Profile watcher -> request queue -> CLI -> Supervisor reload
+All runtime components -> contextual Python logging -> systemd journal
 ```
 
 The project has a reasonable small-system flow, but device management, delayed key handling, process supervision, reloads, and command execution mutate live state across processes and threads without clear ownership.
@@ -198,7 +208,7 @@ Use a deterministic state machine with per-key state and monotonic timestamps. I
 
 ### Action Executor
 
-Control subprocess concurrency, dry-run behavior, logging, completion, and shutdown. Existing command strings can remain trusted shell actions for configuration compatibility, while explicit argument-array actions can be supported for safer execution.
+Control subprocess concurrency, logging, completion, and shutdown. Trusted shell strings remain the sole action format by explicit project decision.
 
 ## Roadmap
 
@@ -224,8 +234,8 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 ### Phase 3: Commands and Operations
 
 1. [x] Add a bounded action executor that tracks subprocesses and logs exit status.
-2. Preserve trusted shell-string actions for compatibility and support explicit argument-array actions.
-3. Use Python logging with device, profile, key, and worker context.
+2. Declined: keep trusted shell-string actions and do not add argument-array actions.
+3. [x] Use Python logging with device, profile, key, and worker context.
 4. Return nonzero exit codes for startup and configuration failures.
 5. Add a real `[project.scripts]` entry point and a checked-in systemd unit template.
 6. [x] Remove or repair `watch.sh` and align the Makefile target names.

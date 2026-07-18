@@ -1,3 +1,4 @@
+import logging
 import multiprocessing
 import time
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ RESTART_MAX_DELAY_SECONDS = 30.0
 RESTART_STABLE_SECONDS = 30.0
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
 KILL_JOIN_TIMEOUT_SECONDS = 1.0
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -131,7 +133,10 @@ class ProfileSupervisor:
                 ):
                     worker.failure_count = 0
                     worker.started_at = None
-                    print(f'Restart backoff reset for {worker.device_name}')
+                    logger.info(
+                        'worker restart backoff reset',
+                        extra={'device': worker.device_name, 'pid': process.pid},
+                    )
                 continue
 
             if process is not None:
@@ -181,13 +186,16 @@ class ProfileSupervisor:
             process.start()
             started = True
             worker.process = process
-            if self._device_present(worker.device_name):
-                print(f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}")
-            else:
-                print(
-                    f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}. "
-                    "Waiting for device..."
-                )
+            device_present = self._device_present(worker.device_name)
+            logger.info(
+                'worker started',
+                extra={
+                    'device': worker.device_name,
+                    'profiles': prepared_profile.paths,
+                    'pid': process.pid,
+                    'mode': 'listening' if device_present else 'waiting',
+                },
+            )
             worker.retry_at = None
             worker.started_at = self._clock()
         except Exception:
@@ -208,9 +216,13 @@ class ProfileSupervisor:
                 break
         worker.retry_at = now + delay
         worker.started_at = None
-        print(
-            f'Worker for {worker.device_name} failed: {reason}. '
-            f'Retrying in {delay:g} seconds.'
+        logger.warning(
+            'worker failed; restart scheduled',
+            extra={
+                'device': worker.device_name,
+                'retry_seconds': delay,
+                'error': reason,
+            },
         )
 
     @staticmethod
@@ -226,7 +238,10 @@ class ProfileSupervisor:
 
         unresponsive_processes = [process for process in processes if process.is_alive()]
         for process in unresponsive_processes:
-            print(f'Worker process {process.pid} did not stop gracefully; killing it')
+            logger.warning(
+                'worker did not stop gracefully; killing it',
+                extra={'pid': process.pid},
+            )
             process.kill()
         for process in unresponsive_processes:
             process.join(timeout=KILL_JOIN_TIMEOUT_SECONDS)

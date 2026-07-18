@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Protocol
 
@@ -11,6 +12,7 @@ from .config import BindingConfig, KeyboardConfig
 
 EVENT_DEBOUNCE_SECONDS = 0.2
 DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
+logger = logging.getLogger(__name__)
 
 
 class Handler(Protocol):
@@ -40,10 +42,16 @@ class KeyboardHandler:
             config: KeyboardConfig,
             clock=time.monotonic,
             action_executor: ActionExecutor | None = None,
+            device: str | None = None,
     ):
         self._clock = clock
         self.config = config
-        self.action_executor = action_executor if action_executor is not None else ActionExecutor()
+        self.device = device
+        self.action_executor = (
+            action_executor
+            if action_executor is not None
+            else ActionExecutor(device=device)
+        )
 
         self.active_layer = None
         self.layer_activation_key = None
@@ -65,7 +73,10 @@ class KeyboardHandler:
         # Get current bindings (either from active layer or base bindings)
         current_bindings = self.get_current_layer_bindings()
         if code not in current_bindings:
-            print(f'No keybinding found for {event}')
+            logger.debug(
+                'no key binding for input event',
+                extra=self._context(key=code, event=str(event)),
+            )
             return
 
         layer_generation = self._layer_generation if self.active_layer else None
@@ -85,10 +96,13 @@ class KeyboardHandler:
 
     def get_current_layer_bindings(self):
         if self.active_layer:
-            print(f"Using layer {self.active_layer} bindings")
+            logger.debug(
+                'using layer bindings',
+                extra=self._context(layer=self.active_layer),
+            )
             return self.config.layers[self.active_layer].bindings
 
-        print("Using base bindings")
+        logger.debug('using base bindings', extra=self._context())
         return self.config.bindings
 
     def handle_event(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
@@ -133,15 +147,28 @@ class KeyboardHandler:
 
             self.event_logs.pop(code, None)
             if event_value not in binding.actions:
-                print(f"No keybinding found for '{event_value}' on {event}")
+                logger.debug(
+                    'no binding for resolved event',
+                    extra=self._context(key=code, event=event_value),
+                )
                 return
 
-            print(f"Commands found for '{event_value}' on {event}")
+            logger.debug(
+                'actions resolved for input event',
+                extra=self._context(key=code, event=event_value),
+            )
             for command in binding.actions[event_value]:
                 if command.startswith('^'):
                     self.execute_handler_command(command[1:], code)
                 else:
-                    print(f"Executing command '{command}' for '{event_value}' on {event}")
+                    logger.info(
+                        'submitting action',
+                        extra=self._context(
+                            key=code,
+                            event=event_value,
+                            command=command,
+                        ),
+                    )
                     self.action_executor.submit(command)
         finally:
             self._finish_one_shot_layer(event, code, layer_generation)
@@ -159,7 +186,10 @@ class KeyboardHandler:
         if code == self._layer_once_key:
             return True
 
-        print(f"One-shot layer '{self.active_layer}' is already in use by {self._layer_once_key}")
+        logger.debug(
+            'one-shot layer already claimed',
+            extra=self._context(layer=self.active_layer, key=self._layer_once_key),
+        )
         return False
 
     def _finish_one_shot_layer(self, event, code, layer_generation):
@@ -183,10 +213,19 @@ class KeyboardHandler:
             self._layer_once_key = None
             if once and deactivate_after > 0:
                 self._layer_deadline = self._clock() + deactivate_after
-            print(f"Layer '{layer_name}' activated {'(once)' if once else '(persistent)'}")
+            logger.info(
+                'layer activated',
+                extra=self._context(
+                    layer=layer_name,
+                    mode='once' if once else 'persistent',
+                ),
+            )
             utils.send_notification("Layer Activated", f"Layer '{layer_name}' is now active")
         else:
-            print(f"Layer '{layer_name}' not found")
+            logger.warning(
+                'layer not found',
+                extra=self._context(layer=layer_name),
+            )
 
     def deactivate_layer(self):
         self._cancel_layer_deadline()
@@ -197,7 +236,7 @@ class KeyboardHandler:
         self.layer_used = False
         self.layer_once = False
         self._layer_once_key = None
-        print(f"Layer '{layer}' deactivated")
+        logger.info('layer deactivated', extra=self._context(layer=layer))
         if layer:
             utils.send_notification("Layer Deactivated", f"Layer '{layer}' is now deactivated")
         else:
@@ -254,4 +293,12 @@ class KeyboardHandler:
         elif command == 'default_layer':
             self.deactivate_layer()
         else:
-            print(f"Handler command '{command}' not found")
+            logger.warning(
+                'handler command not found',
+                extra=self._context(command=command, key=code),
+            )
+
+    def _context(self, **values) -> dict:
+        if self.device is not None:
+            values['device'] = self.device
+        return values

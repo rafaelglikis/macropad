@@ -83,6 +83,7 @@ class ShutdownSignalTests(unittest.TestCase):
         args = SimpleNamespace(subcommand='detect')
 
         with (
+                patch('macropad.cli.configure_logging') as configure_logging,
                 patch('macropad.cli.parse_args', return_value=args),
                 patch('macropad.cli.detect') as detect,
                 patch('macropad.cli.install_shutdown_handler') as install_shutdown,
@@ -90,6 +91,7 @@ class ShutdownSignalTests(unittest.TestCase):
             cli.main()
 
         detect.assert_called_once_with(args)
+        configure_logging.assert_called_once_with()
         install_shutdown.assert_not_called()
 
 

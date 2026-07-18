@@ -79,6 +79,28 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         )
         self.assertIsNone(handler.active_layer)
 
+    def test_action_submission_logs_device_key_and_event_context(self):
+        handler = KeyboardHandler(
+            self._keyboard_config({'KEY_A': {'up': 'a-command'}}),
+            clock=self.clock,
+            action_executor=self.action_executor,
+            device='Test Device',
+        )
+
+        with patch('macropad.handlers.logger') as logger:
+            handler.handle(self._event(ecodes.KEY_A, 0))
+
+        logger.info.assert_called_once_with(
+            'submitting action',
+            extra={
+                'key': 'KEY_A',
+                'event': 'up',
+                'command': 'a-command',
+                'device': 'Test Device',
+            },
+        )
+        self.run_command.assert_called_once_with('a-command')
+
     def test_one_shot_down_binding_does_not_fall_through_on_release(self):
         handler = self._create_handler({'down': 'layer-command'})
         self._activate_layer(handler)

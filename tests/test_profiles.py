@@ -206,6 +206,16 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(profile_config, restored_config)
 
+    def test_profile_with_action_executor_remains_picklable(self):
+        profile_config = profiles.validate_profile_data(self._profile_data())
+        profile = profiles.create_from_data(profile_config)
+
+        restored_profile = pickle.loads(pickle.dumps(profile))
+
+        self.assertEqual(profile.config, restored_profile.config)
+        self.assertEqual('Demo Device', restored_profile.handler.device)
+        self.assertEqual('Demo Device', restored_profile.handler.action_executor.device)
+
     def test_merge_combines_typed_profile_fragments(self):
         first = profiles.validate_profile_data(
             self._profile_data(bindings={'KEY_A': 'a-command'}),
