@@ -55,8 +55,44 @@ class ProfileSupervisor:
 
     def reload(self, profile_paths: list[str]) -> None:
         prepared_profiles = prepare_profiles(profile_paths)
-        self.shutdown()
-        self._start_prepared_profiles(prepared_profiles)
+        prepared_by_device = {
+            prepared_profile.device_name: prepared_profile
+            for prepared_profile in prepared_profiles
+        }
+
+        removed_workers = [
+            self.workers.pop(device_name)
+            for device_name in list(self.workers)
+            if device_name not in prepared_by_device
+        ]
+        self._stop_workers(removed_workers)
+
+        start_errors = []
+        for device_name, prepared_profile in prepared_by_device.items():
+            current_worker = self.workers.get(device_name)
+            if (
+                    current_worker
+                    and current_worker.process.is_alive()
+                    and current_worker.prepared_profile.profile.config == prepared_profile.profile.config
+            ):
+                current_worker.prepared_profile = prepared_profile
+                continue
+
+            if current_worker:
+                self.workers.pop(device_name)
+                self._stop_workers([current_worker])
+
+            try:
+                self.workers[device_name] = self._start_worker(prepared_profile)
+            except Exception as error:
+                start_errors.append((device_name, error))
+
+        if start_errors:
+            details = '; '.join(
+                f'{device_name}: {error}'
+                for device_name, error in start_errors
+            )
+            raise RuntimeError(f'Failed to start profile worker(s): {details}') from start_errors[0][1]
 
     def failed_workers(self) -> list[Worker]:
         return [worker for worker in self.workers.values() if not worker.process.is_alive()]
@@ -74,24 +110,38 @@ class ProfileSupervisor:
         started_workers = {}
         try:
             for prepared_profile in prepared_profiles:
-                process = self._process_factory(
-                    target=interceptor.listen,
-                    args=(prepared_profile.profile,),
-                )
-                process.start()
-                worker = Worker(prepared_profile, process)
+                worker = self._start_worker(prepared_profile)
                 started_workers[worker.device_name] = worker
-                if self._device_present(worker.device_name):
-                    print(f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}")
-                else:
-                    print(
-                        f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}. "
-                        "Waiting for device..."
-                    )
         except Exception:
             self._stop_workers(started_workers.values())
             raise
         self.workers = started_workers
+
+    def _start_worker(self, prepared_profile: PreparedProfile) -> Worker:
+        process = self._process_factory(
+            target=interceptor.listen,
+            args=(prepared_profile.profile,),
+        )
+        started = False
+        try:
+            process.start()
+            started = True
+            worker = Worker(prepared_profile, process)
+            if self._device_present(worker.device_name):
+                print(f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}")
+            else:
+                print(
+                    f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}. "
+                    "Waiting for device..."
+                )
+            return worker
+        except Exception:
+            is_alive = process.is_alive()
+            if is_alive:
+                process.terminate()
+            if started or is_alive:
+                process.join(timeout=5)
+            raise
 
     @staticmethod
     def _stop_workers(workers) -> None:

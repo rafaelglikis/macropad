@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Restart only changed or failed device workers instead of reloading every profile process.
+Add per-device exponential restart backoff.
 
 ### Phase 2, Increment 1: Completed
 
@@ -71,7 +71,16 @@ Restart only changed or failed device workers instead of reloading every profile
 - Workers are now indexed by device name in preparation for per-device reconciliation.
 - Reduced `cli.py` to argument parsing, Watchdog setup, notifications, and main-loop dispatch.
 - Added supervisor ownership, invalid-candidate preservation, and shutdown tests.
-- Verification: thirty-six tests pass with unchanged replace-all reload behavior.
+- Verification: thirty-seven tests pass with unchanged replace-all reload behavior.
+
+### Phase 2, Increment 3: Completed
+
+- Compare immutable merged device configurations during reloads.
+- Keep unchanged workers running while starting added workers and stopping removed workers.
+- Restart only workers whose configuration changed or whose process failed.
+- Isolate worker startup failures so other device reconciliation continues.
+- Refresh profile path metadata without restarting a worker when its configuration is unchanged.
+- Verification: forty-three tests pass, all Python files compile, the patch has no whitespace errors, and the active user service loaded seven profile fragments into three device workers.
 
 ### Package Structure Migration: Completed
 
@@ -172,7 +181,7 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 
 1. [x] Queue watcher events instead of reloading from the watcher thread.
 2. [x] Validate and merge the complete candidate configuration before stopping workers.
-3. Restart only the failed or changed device worker.
+3. [x] Restart only the failed or changed device worker.
 4. Add per-device exponential restart backoff.
 5. Replace abrupt termination with a shutdown event and bounded join.
 6. Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
