@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_MESSAGE = 'profile watch mode enabled'
 PROFILE = """device: "Macropad CI Missing Device"
 version: '1'

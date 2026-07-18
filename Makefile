@@ -23,10 +23,10 @@ test:
 	uv run python -m unittest discover -v
 
 test-wheel:
-	uv run python tests/wheel_smoke.py
+	uv run python tests/integration/wheel_smoke.py
 
 test-service:
-	uv run python tests/service_smoke.py
+	uv run python tests/integration/service_smoke.py
 
 lint:
 	uv run ruff check .

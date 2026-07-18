@@ -6,7 +6,7 @@
 - Create/update the project `.venv` with `make` or `uv sync`. Use `uv sync --frozen` and `uv lock --check` when reproducing CI; run `uv lock` only after dependency metadata changes.
 - Run one test with `uv run python -m unittest tests.test_handlers.KeyboardHandlerLayerTests.test_down_only_binding_repeats_for_key_hold_events`; run a module with `uv run python -m unittest tests.test_handlers`.
 - Before finalizing Python changes, run `make format`, `make lint`, and `make test` in that order. Ruff is pinned in the dev dependency group and enforces 100-column, single-quote formatting plus `E4`, `E7`, `E9`, `F`, `I`, and `B` rules.
-- Run the targeted integration checks when their boundary changes: `make test-wheel` for packaging/assets/entry points, `make test-service` for headless startup and graceful SIGTERM, and `make test-systemd` for unit rendering. `make test-wheel` creates an isolated environment and may need network access and native build dependencies.
+- Integration scripts live under `tests/integration/` and are intentionally excluded from normal `unittest` discovery. Run `make test-wheel` for packaging/assets/metadata/entry points, `make test-service` for headless startup and graceful SIGTERM, and `make test-systemd` for unit rendering. `make test-wheel` creates an isolated environment and may need network access and native build dependencies.
 - `make build` creates ignored artifacts under `dist/`; systemd rendering creates ignored `tmp/macropad.service`. Do not edit or commit either generated directory.
 - CI tests Python 3.10 through 3.14, then checks lint, lockfile, wheel installation, service lifecycle, systemd rendering, and distribution artifacts.
 

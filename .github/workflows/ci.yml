@@ -72,7 +72,7 @@ jobs:
         run: make lint
 
       - name: Verify wheel installation
-        run: uv run --frozen python tests/wheel_smoke.py
+        run: uv run --frozen python tests/integration/wheel_smoke.py
 
       - name: Verify systemd unit
         run: make test-systemd
