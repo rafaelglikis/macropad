@@ -2,7 +2,6 @@
 import argparse
 import pathlib
 import queue
-import signal
 import time
 from typing import List
 
@@ -137,8 +136,19 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
     return True
 
 
+def run_supervision_cycle(
+        profile_supervisor: ProfileSupervisor,
+        args: argparse.Namespace,
+        reload_requests: queue.SimpleQueue,
+) -> None:
+    changed_paths = drain_reload_requests(reload_requests)
+    if changed_paths:
+        print(f"Profile changes detected: {', '.join(changed_paths)}")
+        reload_profiles(profile_supervisor, args)
+    profile_supervisor.tick()
+
+
 def main():
-    signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
     observer = None
     reload_requests = queue.SimpleQueue()
     profile_supervisor = ProfileSupervisor()
@@ -187,23 +197,12 @@ def main():
                         print(f"Error starting observer: {e}")
                         observer = None
 
-            if observer and observer.is_alive():
-                try:
-                    while True:
-                        time.sleep(1)
-                        changed_paths = drain_reload_requests(reload_requests)
-                        if changed_paths:
-                            print(f"Profile changes detected: {', '.join(changed_paths)}")
-                            reload_profiles(profile_supervisor, args)
-                            continue
-                        failed_workers = profile_supervisor.failed_workers()
-                        if failed_workers:
-                            print(f"Process {failed_workers[0].process.pid} died, reloading...")
-                            reload_profiles(profile_supervisor, args)
-                except KeyboardInterrupt:
-                    pass
-            else:
-                profile_supervisor.join()
+            try:
+                while True:
+                    time.sleep(1)
+                    run_supervision_cycle(profile_supervisor, args, reload_requests)
+            except KeyboardInterrupt:
+                pass
 
         elif args.subcommand == 'detect':
             detect(args)

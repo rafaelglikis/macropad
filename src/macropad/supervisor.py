@@ -1,7 +1,13 @@
 import multiprocessing
+import time
 from dataclasses import dataclass
 
 from . import interceptor, profiles
+
+
+RESTART_INITIAL_DELAY_SECONDS = 1.0
+RESTART_MAX_DELAY_SECONDS = 30.0
+RESTART_STABLE_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -17,7 +23,10 @@ class PreparedProfile:
 @dataclass
 class Worker:
     prepared_profile: PreparedProfile
-    process: multiprocessing.Process
+    process: multiprocessing.Process | None = None
+    failure_count: int = 0
+    retry_at: float | None = None
+    started_at: float | None = None
 
     @property
     def device_name(self) -> str:
@@ -43,9 +52,10 @@ def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
 
 
 class ProfileSupervisor:
-    def __init__(self, process_factory=None, device_present=None):
+    def __init__(self, process_factory=None, device_present=None, clock=None):
         self._process_factory = process_factory or multiprocessing.Process
         self._device_present = device_present or interceptor.has_device
+        self._clock = clock or time.monotonic
         self.workers: dict[str, Worker] = {}
 
     def start(self, profile_paths: list[str]) -> None:
@@ -72,7 +82,6 @@ class ProfileSupervisor:
             current_worker = self.workers.get(device_name)
             if (
                     current_worker
-                    and current_worker.process.is_alive()
                     and current_worker.prepared_profile.profile.config == prepared_profile.profile.config
             ):
                 current_worker.prepared_profile = prepared_profile
@@ -82,9 +91,12 @@ class ProfileSupervisor:
                 self.workers.pop(device_name)
                 self._stop_workers([current_worker])
 
+            worker = Worker(prepared_profile)
+            self.workers[device_name] = worker
             try:
-                self.workers[device_name] = self._start_worker(prepared_profile)
+                self._launch_worker(worker)
             except Exception as error:
+                self._schedule_restart(worker, self._clock(), str(error))
                 start_errors.append((device_name, error))
 
         if start_errors:
@@ -94,12 +106,38 @@ class ProfileSupervisor:
             )
             raise RuntimeError(f'Failed to start profile worker(s): {details}') from start_errors[0][1]
 
-    def failed_workers(self) -> list[Worker]:
-        return [worker for worker in self.workers.values() if not worker.process.is_alive()]
+    def tick(self) -> None:
+        now = self._clock()
+        for worker in list(self.workers.values()):
+            process = worker.process
+            if process is not None and process.is_alive():
+                if (
+                        worker.failure_count
+                        and worker.started_at is not None
+                        and now - worker.started_at >= RESTART_STABLE_SECONDS
+                ):
+                    worker.failure_count = 0
+                    worker.started_at = None
+                    print(f'Restart backoff reset for {worker.device_name}')
+                continue
 
-    def join(self) -> None:
-        for worker in self.workers.values():
-            worker.process.join()
+            if process is not None:
+                process.join(timeout=5)
+                worker.process = None
+                worker.started_at = None
+                self._schedule_restart(worker, now, f'process {process.pid} exited')
+                continue
+
+            if worker.retry_at is None:
+                self._schedule_restart(worker, now, 'worker is not running')
+                continue
+            if now < worker.retry_at:
+                continue
+
+            try:
+                self._launch_worker(worker)
+            except Exception as error:
+                self._schedule_restart(worker, now, str(error))
 
     def shutdown(self) -> None:
         workers = list(self.workers.values())
@@ -110,14 +148,16 @@ class ProfileSupervisor:
         started_workers = {}
         try:
             for prepared_profile in prepared_profiles:
-                worker = self._start_worker(prepared_profile)
+                worker = Worker(prepared_profile)
+                self._launch_worker(worker)
                 started_workers[worker.device_name] = worker
         except Exception:
             self._stop_workers(started_workers.values())
             raise
         self.workers = started_workers
 
-    def _start_worker(self, prepared_profile: PreparedProfile) -> Worker:
+    def _launch_worker(self, worker: Worker) -> None:
+        prepared_profile = worker.prepared_profile
         process = self._process_factory(
             target=interceptor.listen,
             args=(prepared_profile.profile,),
@@ -126,7 +166,6 @@ class ProfileSupervisor:
         try:
             process.start()
             started = True
-            worker = Worker(prepared_profile, process)
             if self._device_present(worker.device_name):
                 print(f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}")
             else:
@@ -134,7 +173,9 @@ class ProfileSupervisor:
                     f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}. "
                     "Waiting for device..."
                 )
-            return worker
+            worker.process = process
+            worker.retry_at = None
+            worker.started_at = self._clock()
         except Exception:
             is_alive = process.is_alive()
             if is_alive:
@@ -144,10 +185,29 @@ class ProfileSupervisor:
             raise
 
     @staticmethod
+    def _schedule_restart(worker: Worker, now: float, reason: str) -> None:
+        worker.failure_count += 1
+        delay = RESTART_INITIAL_DELAY_SECONDS
+        for _ in range(worker.failure_count - 1):
+            delay = min(delay * 2, RESTART_MAX_DELAY_SECONDS)
+            if delay == RESTART_MAX_DELAY_SECONDS:
+                break
+        worker.retry_at = now + delay
+        worker.started_at = None
+        print(
+            f'Worker for {worker.device_name} failed: {reason}. '
+            f'Retrying in {delay:g} seconds.'
+        )
+
+    @staticmethod
     def _stop_workers(workers) -> None:
-        workers = list(workers)
-        for worker in workers:
-            if worker.process.is_alive():
-                worker.process.terminate()
-        for worker in workers:
-            worker.process.join(timeout=5)
+        processes = [
+            worker.process
+            for worker in workers
+            if worker.process is not None
+        ]
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+        for process in processes:
+            process.join(timeout=5)

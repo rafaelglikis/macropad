@@ -51,5 +51,18 @@ class ProfileReloadTests(unittest.TestCase):
         )
 
 
+class SupervisionCycleTests(unittest.TestCase):
+    def test_supervisor_ticks_without_watchdog_events(self):
+        profile_supervisor = SimpleNamespace(tick=Mock())
+
+        cli.run_supervision_cycle(
+            profile_supervisor,
+            SimpleNamespace(),
+            queue.SimpleQueue(),
+        )
+
+        profile_supervisor.tick.assert_called_once_with()
+
+
 if __name__ == '__main__':
     unittest.main()

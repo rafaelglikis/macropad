@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Add per-device exponential restart backoff.
+Replace abrupt worker termination with a shutdown event and bounded join.
 
 ### Phase 2, Increment 1: Completed
 
@@ -81,6 +81,19 @@ Add per-device exponential restart backoff.
 - Isolate worker startup failures so other device reconciliation continues.
 - Refresh profile path metadata without restarting a worker when its configuration is unchanged.
 - Verification: forty-three tests pass, all Python files compile, the patch has no whitespace errors, and the active user service loaded seven profile fragments into three device workers.
+
+### Phase 2, Increment 4: Completed
+
+- Retain each configured device as a worker slot while its process is running or waiting to retry.
+- Add monotonic per-device restart delays of 1, 2, 4, 8, 16, and at most 30 seconds.
+- Reset a device's backoff after its replacement process remains alive for thirty seconds.
+- Preserve backoff across unchanged reloads, bypass it for changed configurations, and cancel it for removed devices.
+- Keep failed process launches eligible for later retries without affecting healthy devices.
+- Run the supervisor tick loop with or without Watchdog enabled.
+- Remove the custom `SIGCHLD` reaper so `multiprocessing` can observe and collect worker exits.
+- Track detached command subprocesses explicitly and reap completed commands from the worker loop.
+- Add real-process coverage for worker exit detection and replacement.
+- Verification: fifty-two tests pass, all Python files compile, and live fault injection restarted one killed worker after one second while another worker continued processing input.
 
 ### Package Structure Migration: Completed
 
@@ -182,9 +195,9 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 1. [x] Queue watcher events instead of reloading from the watcher thread.
 2. [x] Validate and merge the complete candidate configuration before stopping workers.
 3. [x] Restart only the failed or changed device worker.
-4. Add per-device exponential restart backoff.
+4. [x] Add per-device exponential restart backoff.
 5. Replace abrupt termination with a shutdown event and bounded join.
-6. Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
+6. [x] Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
 7. Use `selectors` for device descriptors and rescan paths even when other devices remain connected.
 
 ### Phase 3: Commands and Operations

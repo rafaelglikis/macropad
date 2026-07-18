@@ -3,6 +3,8 @@ import time
 import evdev
 from evdev import InputDevice
 
+from . import utils
+
 
 def _matching_device_paths(device_name: str) -> list[str]:
     matching_paths = []
@@ -102,6 +104,7 @@ def listen(profile):
                     del devices[path]
 
             profile.handler.tick()
+            utils.reap_finished_commands()
             time.sleep(0.01)
     finally:
         for device in devices.values():

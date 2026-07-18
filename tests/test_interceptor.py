@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 from unittest.mock import patch
 
 from macropad import interceptor
@@ -41,6 +43,25 @@ class DeviceMatchingTests(unittest.TestCase):
             self.assertFalse(interceptor.has_device(device.path))
 
         self.assertTrue(device.closed)
+
+
+class ListenerTests(unittest.TestCase):
+    def test_listener_reaps_finished_commands_each_cycle(self):
+        profile = SimpleNamespace(
+            device='Macro Keyboard',
+            handler=Mock(),
+        )
+
+        with (
+                patch('macropad.interceptor._matching_device_paths', return_value=[]),
+                patch('macropad.interceptor.utils.reap_finished_commands') as reap_commands,
+                patch('macropad.interceptor.time.sleep', side_effect=KeyboardInterrupt),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                interceptor.listen(profile)
+
+        profile.handler.tick.assert_called_once_with()
+        reap_commands.assert_called_once_with()
 
 
 if __name__ == '__main__':
