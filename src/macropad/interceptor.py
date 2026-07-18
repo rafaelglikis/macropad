@@ -1,5 +1,5 @@
+import errno
 import logging
-import signal
 import time
 
 import evdev
@@ -8,14 +8,7 @@ from evdev import InputDevice
 logger = logging.getLogger(__name__)
 
 
-def install_shutdown_handler(shutdown_event) -> None:
-    def request_shutdown(signum, frame):
-        shutdown_event.set()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-
-
-def _matching_device_paths(device_name: str) -> list[str]:
+def matching_device_paths(device_name: str) -> list[str]:
     matching_paths = []
 
     for path in evdev.list_devices():
@@ -34,17 +27,7 @@ def _matching_device_paths(device_name: str) -> list[str]:
 
 
 def has_device(device_name: str) -> bool:
-    for path in evdev.list_devices():
-        device = InputDevice(path)
-        try:
-            matches = device.name == device_name
-        finally:
-            device.close()
-
-        if matches:
-            return True
-
-    return False
+    return bool(matching_device_paths(device_name))
 
 
 def print_device_info(device: InputDevice):
@@ -58,40 +41,51 @@ def print_device_info(device: InputDevice):
     )
 
 
-def detect() -> InputDevice:
-    initial_devices = evdev.list_devices()
-    devices = evdev.list_devices()
-
+def detect() -> str:
+    known_paths = set(evdev.list_devices())
+    candidate_paths = set()
     logger.info('detecting new input device')
-    while True:
-        if len(devices) > len(initial_devices):
+    while not candidate_paths:
+        current_paths = set(evdev.list_devices())
+        candidate_paths = current_paths - known_paths
+        known_paths.intersection_update(current_paths)
+        if candidate_paths:
             break
         time.sleep(0.3)
-        initial_devices, devices = devices, evdev.list_devices()
 
     logger.info('new input device detected')
-    new_devices = list(set(devices) - set(initial_devices))
-
     logger.info('waiting for key press on new input device')
     while True:
-        for device_path in new_devices:
-            device = InputDevice(device_path)
-            if device.active_keys():
+        current_paths = set(evdev.list_devices())
+        candidate_paths.intersection_update(current_paths)
+        candidate_paths.update(current_paths - known_paths)
+        for device_path in sorted(candidate_paths):
+            device = None
+            try:
+                device = InputDevice(device_path)
+                if not device.active_keys():
+                    continue
                 print_device_info(device)
-                return device
+                return device.name
+            except OSError as error:
+                if error.errno != errno.ENODEV:
+                    raise
+                candidate_paths.discard(device_path)
+            finally:
+                if device is not None:
+                    device.close()
         time.sleep(0.3)
 
 
-def listen(profile, shutdown_event):
-    install_shutdown_handler(shutdown_event)
+def listen(device_name, handler, shutdown_event):
     devices = {}
     last_scan = 0
 
     try:
         while not shutdown_event.is_set():
-            current_time = time.time()
+            current_time = time.monotonic()
             if not devices and current_time - last_scan >= 0.3:
-                for path in _matching_device_paths(profile.device):
+                for path in matching_device_paths(device_name):
                     if path in devices:
                         continue
 
@@ -100,32 +94,31 @@ def listen(profile, shutdown_event):
                         device = InputDevice(path)
                         print_device_info(device)
                         device.grab()
-                    except OSError as e:
+                    except OSError as error:
                         if device:
                             device.close()
-                        if e.errno != 19:
+                        if error.errno != errno.ENODEV:
                             raise
                         continue
                     devices[path] = device
-                last_scan = time.time()
+                last_scan = current_time
 
             for path, device in list(devices.items()):
                 try:
-                    while not shutdown_event.is_set() and (e := device.read_one()):
-                        profile.handler.handle(e)
-                except OSError as e:
-                    if e.errno != 19:
+                    while not shutdown_event.is_set() and (event := device.read_one()):
+                        handler.handle(event)
+                except OSError as error:
+                    if error.errno != errno.ENODEV:
                         raise
                     logger.warning(
                         'input device lost',
-                        extra={'device': profile.device, 'path': path},
+                        extra={'device': device_name, 'path': path},
                     )
                     device.close()
                     del devices[path]
 
-            profile.handler.tick()
+            handler.tick()
             time.sleep(0.01)
     finally:
         for device in devices.values():
             device.close()
-        profile.handler.shutdown()

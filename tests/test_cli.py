@@ -43,7 +43,7 @@ class ProfileReloadTests(unittest.TestCase):
 
         with (
             patch('macropad.cli.get_profile_paths', return_value=['/profiles/macros.yml']),
-            patch('macropad.cli.utils.send_notification') as send_notification,
+            patch('macropad.cli.notifications.send') as send_notification,
         ):
             succeeded = cli.reload_profiles(profile_supervisor, args)
 
@@ -87,13 +87,13 @@ class ShutdownSignalTests(unittest.TestCase):
         with (
             patch('macropad.cli.configure_logging') as configure_logging,
             patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.detect') as detect,
+            patch('macropad.cli.run_detect', return_value=0) as run_detect,
             patch('macropad.cli.install_shutdown_handler') as install_shutdown,
         ):
             exit_status = cli.main()
 
         self.assertEqual(0, exit_status)
-        detect.assert_called_once_with(args)
+        run_detect.assert_called_once_with(args)
         configure_logging.assert_called_once_with()
         install_shutdown.assert_not_called()
 
@@ -108,17 +108,12 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch(
-                'macropad.cli.notify2.init',
-                side_effect=RuntimeError('notification service unavailable'),
-            ),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.get_profile_paths', return_value=[]),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(1, exit_status)
         supervisor_type.return_value.start.assert_not_called()
@@ -133,14 +128,12 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.notify2.init'),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
             supervisor_type.return_value.start.side_effect = ValueError('invalid binding')
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(1, exit_status)
         supervisor_type.return_value.shutdown.assert_called_once_with()
@@ -154,16 +147,14 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.notify2.init'),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
             patch('macropad.cli.PollingObserver') as observer_type,
         ):
             observer_type.return_value.start.side_effect = RuntimeError('observer failed')
             observer_type.return_value.is_alive.return_value = False
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(1, exit_status)
         supervisor_type.return_value.shutdown.assert_called_once_with()
@@ -177,13 +168,11 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.notify2.init'),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(1, exit_status)
         supervisor_type.return_value.start.assert_not_called()
@@ -198,16 +187,14 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.notify2.init'),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.get_profile_paths', return_value=args.profile_paths),
             patch('macropad.cli.pathlib.Path') as path_type,
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
             path_type.return_value.exists.return_value = False
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(1, exit_status)
         supervisor_type.return_value.start.assert_not_called()
@@ -224,14 +211,12 @@ class MainExitStatusTests(unittest.TestCase):
         shutdown_requested.wait.return_value = True
 
         with (
-            patch('macropad.cli.configure_logging'),
-            patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.notify2.init'),
+            patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.threading.Event', return_value=shutdown_requested),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
-            exit_status = cli.main()
+            exit_status = cli.run_listen(args)
 
         self.assertEqual(0, exit_status)
         supervisor_type.return_value.shutdown.assert_called_once_with()
@@ -242,13 +227,11 @@ class MainExitStatusTests(unittest.TestCase):
         with (
             patch('macropad.cli.configure_logging'),
             patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.detect', side_effect=OSError(5, 'input/output error')),
-            patch('macropad.cli.ProfileSupervisor') as supervisor_type,
+            patch('macropad.cli.run_detect', side_effect=OSError(5, 'input/output error')),
         ):
             exit_status = cli.main()
 
         self.assertEqual(1, exit_status)
-        supervisor_type.return_value.shutdown.assert_called_once_with()
 
     def test_lost_input_device_returns_success(self):
         args = SimpleNamespace(subcommand='detect')
@@ -257,15 +240,13 @@ class MainExitStatusTests(unittest.TestCase):
             patch('macropad.cli.configure_logging'),
             patch('macropad.cli.parse_args', return_value=args),
             patch(
-                'macropad.cli.detect',
+                'macropad.cli.run_detect',
                 side_effect=OSError(errno.ENODEV, 'no such device'),
             ),
-            patch('macropad.cli.ProfileSupervisor') as supervisor_type,
         ):
             exit_status = cli.main()
 
         self.assertEqual(0, exit_status)
-        supervisor_type.return_value.shutdown.assert_called_once_with()
 
     def test_module_entry_point_propagates_main_status(self):
         with (

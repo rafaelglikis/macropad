@@ -7,19 +7,17 @@ import queue
 import signal
 import threading
 import time
-from typing import List
 
 import argcomplete
-import notify2
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
-from . import interceptor, profiles, utils
+from . import interceptor, notifications, profiles
 from .logging_config import configure_logging
 from .supervisor import ProfileSupervisor
-from .utils import DEFAULT_CONFIG_DIR
 
 logger = logging.getLogger(__name__)
+DEFAULT_CONFIG_DIR = pathlib.Path.home() / '.config' / 'macropad' / 'profiles'
 
 
 class ProfileReloadHandler(FileSystemEventHandler):
@@ -76,7 +74,7 @@ bindings:
         logger.info("run 'macropad detect --generate-profile' to create a device profile")
 
 
-def get_profile_paths(args: argparse.Namespace) -> List[str]:
+def get_profile_paths(args: argparse.Namespace) -> list[str]:
     all_profile_paths = list(args.profile_paths) if args.profile_paths else []
 
     if args.profile_directories:
@@ -143,7 +141,7 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
             'profile reload failed',
             extra={'profiles': tuple(profile_paths), 'error': str(error)},
         )
-        utils.send_notification(
+        notifications.send(
             title='Macropad Configuration Error',
             message=f'Configuration reload failed: {error}',
         )
@@ -151,7 +149,7 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
 
     worker_count = len(profile_supervisor.workers)
     logger.info('profiles reloaded', extra={'count': worker_count})
-    utils.send_notification(
+    notifications.send(
         title='Macropad Configuration Updated',
         message=f'Successfully reloaded {worker_count} profile(s)',
     )
@@ -177,111 +175,110 @@ def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
     signal.signal(signal.SIGTERM, request_shutdown)
 
 
-def main() -> int:
-    configure_logging()
+def start_profile_observer(
+    watch_directories: list[pathlib.Path],
+    reload_requests: queue.SimpleQueue,
+) -> PollingObserver:
+    observer = PollingObserver()
+    event_handler = ProfileReloadHandler(reload_requests)
+    for directory in watch_directories:
+        observer.schedule(
+            event_handler,
+            str(directory),
+            recursive=False,
+        )
+        logger.info('watching profile directory', extra={'path': str(directory)})
+
+    try:
+        observer.start()
+    except Exception:
+        if observer.is_alive():
+            observer.stop()
+            observer.join()
+        raise
+
+    logger.info('profile watch mode enabled')
+    return observer
+
+
+def stop_profile_observer(observer: PollingObserver | None) -> None:
+    if observer is not None and observer.is_alive():
+        observer.stop()
+        observer.join()
+
+
+def run_listen(args: argparse.Namespace) -> int:
     observer = None
     reload_requests = queue.SimpleQueue()
     profile_supervisor = ProfileSupervisor()
     shutdown_requested = threading.Event()
+    install_shutdown_handler(shutdown_requested)
+    notifications.initialize()
 
     try:
-        args = parse_args()
-        if args.subcommand == 'listen':
-            install_shutdown_handler(shutdown_requested)
-            try:
-                notify2.init('Macropad')
-            except Exception as error:
-                logger.warning(
-                    'notification initialization failed; continuing without notifications',
-                    extra={'error': str(error)},
-                )
+        using_default_config = False
+        if not args.profile_paths and not args.profile_directories:
+            ensure_default_config()
+            args.profile_directories = [str(DEFAULT_CONFIG_DIR)]
+            using_default_config = True
 
-            using_default_config = False
-            if not args.profile_paths and not args.profile_directories:
-                ensure_default_config()
-                args.profile_directories = [str(DEFAULT_CONFIG_DIR)]
-                using_default_config = True
+        all_profile_paths = get_profile_paths(args)
+        if not all_profile_paths:
+            logger.error('no profile files found')
+            return 1
 
-            all_profile_paths = get_profile_paths(args)
-
-            if not all_profile_paths:
-                logger.error('no profile files found')
+        enable_watch = args.watch or using_default_config
+        watch_directories = []
+        if enable_watch:
+            if not args.profile_directories:
+                logger.error('watch mode requires a profile directory')
                 return 1
 
-            enable_watch = args.watch or using_default_config
-            watch_directories = []
-            if enable_watch:
-                if not args.profile_directories:
-                    logger.error('watch mode requires a profile directory')
-                    return 1
+            for directory in args.profile_directories:
+                directory_path = pathlib.Path(directory)
+                if directory_path.exists() and directory_path.is_dir():
+                    watch_directories.append(directory_path)
 
-                for directory in args.profile_directories:
-                    dir_path = pathlib.Path(directory)
-                    if dir_path.exists() and dir_path.is_dir():
-                        watch_directories.append(dir_path)
+            if not watch_directories:
+                logger.error('no valid profile directories to watch')
+                return 1
 
-                if not watch_directories:
-                    logger.error('no valid profile directories to watch')
-                    return 1
+        try:
+            profile_supervisor.start(all_profile_paths)
+        except Exception as error:
+            logger.error(
+                'failed to load profiles',
+                extra={'profiles': tuple(all_profile_paths), 'error': str(error)},
+            )
+            return 1
 
+        if enable_watch:
             try:
-                profile_supervisor.start(all_profile_paths)
+                observer = start_profile_observer(watch_directories, reload_requests)
             except Exception as error:
                 logger.error(
-                    'failed to load profiles',
-                    extra={'profiles': tuple(all_profile_paths), 'error': str(error)},
+                    'failed to start profile observer',
+                    extra={'error': str(error)},
                 )
                 return 1
 
-            if enable_watch:
-                observer = PollingObserver()
-                event_handler = ProfileReloadHandler(reload_requests)
-
-                for directory in watch_directories:
-                    observer.schedule(event_handler, str(directory), recursive=False)
-                    logger.info('watching profile directory', extra={'path': str(directory)})
-
-                try:
-                    observer.start()
-                    logger.info('profile watch mode enabled')
-                except Exception as e:
-                    logger.error(
-                        'failed to start profile observer',
-                        extra={'error': str(e)},
-                    )
-                    return 1
-
-            try:
-                while not shutdown_requested.wait(1):
-                    run_supervision_cycle(profile_supervisor, args, reload_requests)
-            except KeyboardInterrupt:
-                pass
-
-        elif args.subcommand == 'detect':
-            detect(args)
-    except KeyboardInterrupt:
-        logger.info('keyboard interrupt received; exiting')
-    except OSError as error:
-        if error.errno == errno.ENODEV:
-            logger.warning('input device lost; exiting', extra={'error': str(error)})
-        else:
-            logger.exception('operating system error; exiting', extra={'error': str(error)})
-            return 1
+        try:
+            while not shutdown_requested.wait(1):
+                run_supervision_cycle(profile_supervisor, args, reload_requests)
+        except KeyboardInterrupt:
+            pass
+        return 0
     finally:
-        if observer and observer.is_alive():
-            observer.stop()
-            observer.join()
+        stop_profile_observer(observer)
         profile_supervisor.shutdown()
 
-    return 0
 
-
-def detect(args: argparse.Namespace):
-    device = interceptor.detect()
+def run_detect(args: argparse.Namespace) -> int:
+    device_name = interceptor.detect()
     if not args.generate_profile:
-        return
+        return 0
 
-    profile_yml = profiles.create_sample(device).dump()
+    profile_yml = profiles.dump_yml(profiles.create_sample(device_name))
     print('----------- Profile -----------')
     print(profile_yml)
     print('-------------------------------')
@@ -295,6 +292,26 @@ def detect(args: argparse.Namespace):
 
     filename.write_text(profile_yml)
     logger.info('sample profile generated', extra={'path': str(filename)})
+    return 0
+
+
+def main() -> int:
+    configure_logging()
+    try:
+        args = parse_args()
+        if args.subcommand == 'listen':
+            return run_listen(args)
+        return run_detect(args)
+    except KeyboardInterrupt:
+        logger.info('keyboard interrupt received; exiting')
+    except OSError as error:
+        if error.errno == errno.ENODEV:
+            logger.warning('input device lost; exiting', extra={'error': str(error)})
+        else:
+            logger.exception('operating system error; exiting', extra={'error': str(error)})
+            return 1
+
+    return 0
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ class FakeClock:
 
 class KeyboardHandlerLayerTests(unittest.TestCase):
     def setUp(self):
-        self.send_notification = patch('macropad.utils.send_notification').start()
+        self.send_notification = patch('macropad.notifications.send').start()
         self.addCleanup(patch.stopall)
         self.clock = FakeClock()
         self.action_executor = Mock()

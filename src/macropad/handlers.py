@@ -1,34 +1,16 @@
 import logging
 import time
-from typing import Protocol
 
 import evdev
 from evdev import InputEvent, KeyEvent
 
-from . import utils
+from . import notifications
 from .actions import ActionExecutor
 from .config import BindingConfig, KeyboardConfig
 
 EVENT_DEBOUNCE_SECONDS = 0.2
 DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
 logger = logging.getLogger(__name__)
-
-
-class Handler(Protocol):
-    """
-    Protocol for Event handlers
-    """
-
-    def handle(self, e: InputEvent) -> None:
-        """
-        :param e:  Event to handle
-        """
-
-    def tick(self) -> None:
-        """Process delayed state transitions that are ready to run."""
-
-    def shutdown(self) -> None:
-        """Release resources owned by the handler."""
 
 
 class KeyboardHandler:
@@ -214,7 +196,7 @@ class KeyboardHandler:
                     mode='once' if once else 'persistent',
                 ),
             )
-            utils.send_notification('Layer Activated', f"Layer '{layer_name}' is now active")
+            notifications.send('Layer Activated', f"Layer '{layer_name}' is now active")
         else:
             logger.warning(
                 'layer not found',
@@ -232,9 +214,9 @@ class KeyboardHandler:
         self._layer_once_key = None
         logger.info('layer deactivated', extra=self._context(layer=layer))
         if layer:
-            utils.send_notification('Layer Deactivated', f"Layer '{layer}' is now deactivated")
+            notifications.send('Layer Deactivated', f"Layer '{layer}' is now deactivated")
         else:
-            utils.send_notification('Layer Deactivated', 'No layer was active')
+            notifications.send('Layer Deactivated', 'No layer was active')
 
     def _cancel_layer_deadline(self):
         self._layer_deadline = None

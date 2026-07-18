@@ -107,9 +107,9 @@ class RealProcessFactory:
 class ProfileSupervisorTests(unittest.TestCase):
     @staticmethod
     def _prepared_profile(device_name='Macro Keyboard', config='current', path=None):
-        profile = SimpleNamespace(device=device_name, config=config)
+        profile_config = SimpleNamespace(device=device_name, revision=config)
         path = path or f'/profiles/{device_name}.yml'
-        return supervisor.PreparedProfile((path,), profile)
+        return supervisor.PreparedProfile((path,), profile_config)
 
     def _create_supervisor(self, clock=None, process_factory=FakeProcess):
         return supervisor.ProfileSupervisor(
@@ -127,7 +127,10 @@ class ProfileSupervisorTests(unittest.TestCase):
             profile_supervisor.start(['/profiles/macros.yml'])
 
         self.assertEqual(['Macro Keyboard'], list(profile_supervisor.workers))
-        self.assertTrue(profile_supervisor.workers['Macro Keyboard'].process.is_alive())
+        process = profile_supervisor.workers['Macro Keyboard'].process
+        self.assertTrue(process.is_alive())
+        self.assertIs(supervisor.worker_runtime.run, process.target)
+        self.assertIs(prepared_profile.config, process.args[0])
 
     def test_invalid_candidate_keeps_current_worker_running(self):
         profile_supervisor = self._create_supervisor()
@@ -250,7 +253,7 @@ class ProfileSupervisorTests(unittest.TestCase):
         self.assertIs(current_worker, profile_supervisor.workers['Macro Keyboard'])
         self.assertTrue(current_worker.process.is_alive())
         self.assertTrue(current_worker.process.killed)
-        self.assertEqual('old', current_worker.prepared_profile.profile.config)
+        self.assertEqual('old', current_worker.prepared_profile.config.revision)
 
     def test_reload_preserves_backoff_for_unchanged_failed_worker(self):
         clock = FakeClock()
@@ -534,13 +537,11 @@ class ProfilePreparationTests(unittest.TestCase):
                 side_effect=[first_config, ValueError('invalid second profile')],
             ),
             patch('macropad.supervisor.profiles.merge_data') as merge_data,
-            patch('macropad.supervisor.profiles.create_from_data') as create_from_data,
         ):
             with self.assertRaisesRegex(ValueError, 'invalid second profile'):
                 supervisor.prepare_profiles(['/profiles/first.yml', '/profiles/second.yml'])
 
         merge_data.assert_not_called()
-        create_from_data.assert_not_called()
 
 
 if __name__ == '__main__':

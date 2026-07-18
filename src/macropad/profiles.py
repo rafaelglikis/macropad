@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 import yaml
 from evdev import ecodes
 
@@ -10,7 +8,6 @@ from .config import (
     ProfileConfig,
     ProfileValidationError,
 )
-from .handlers import Handler, KeyboardHandler
 
 PROFILE_FIELDS = {'device', 'version', 'bindings', 'layers'}
 EVENT_NAMES = {'up', 'down', 'hold', 'double_tap', 'triple_tap'}
@@ -50,23 +47,6 @@ class StrictSafeLoader(yaml.SafeLoader):
         return mapping
 
 
-@dataclass
-class Profile:
-    config: ProfileConfig
-    handler: Handler
-
-    @property
-    def device(self) -> str:
-        return self.config.device
-
-    @property
-    def version(self) -> str:
-        return self.config.version
-
-    def dump(self) -> str:
-        return yaml.dump(self.config.to_data(), sort_keys=False)
-
-
 def load_yml(filename: str) -> ProfileConfig:
     try:
         with open(filename, 'r', encoding='utf-8') as file:
@@ -75,6 +55,10 @@ def load_yml(filename: str) -> ProfileConfig:
         raise ProfileValidationError(str(filename), '', f'invalid YAML: {error}') from error
 
     return validate_profile_data(profile_data, source=str(filename))
+
+
+def dump_yml(profile_config: ProfileConfig) -> str:
+    return yaml.dump(profile_config.to_data(), sort_keys=False)
 
 
 def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileConfig:
@@ -320,13 +304,6 @@ def _merge_binding(
     return BindingConfig(actions=actions)
 
 
-def create_from_data(profile_data: ProfileConfig) -> Profile:
-    return Profile(
-        config=profile_data,
-        handler=KeyboardHandler(profile_data.keyboard, device=profile_data.device),
-    )
-
-
 def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
     if not profile_datas:
         raise ValueError('No profile data to merge')
@@ -370,9 +347,9 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
     )
 
 
-def create_sample(device):
-    config = ProfileConfig(
-        device=device.name,
+def create_sample(device_name: str) -> ProfileConfig:
+    return ProfileConfig(
+        device=device_name,
         version='1',
         keyboard=KeyboardConfig(
             bindings={
@@ -385,4 +362,3 @@ def create_sample(device):
             layers={},
         ),
     )
-    return create_from_data(config)

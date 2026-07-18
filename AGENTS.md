@@ -14,9 +14,10 @@
 
 - Both `macropad` and `python -m macropad` enter through `src/macropad/cli.py`. The CLI owns Watchdog reload requests and is the only component that calls supervisor reloads.
 - `ProfileSupervisor` validates and merges the complete candidate configuration before reconciliation, then owns one worker slot per keyboard name, process lifecycle, per-device retry backoff, and bounded graceful shutdown.
-- Each worker runs `interceptor.listen`, grabs every current `/dev/input/event*` node whose keyboard name matches the profile, and drives `KeyboardHandler.tick()` on the listener thread. Keep delayed key/layer transitions monotonic and threadless; tests use fake clocks rather than sleeps.
+- Each child enters through `worker.run`, constructs its own `KeyboardHandler`, then runs `interceptor.listen` to grab every current `/dev/input/event*` node whose keyboard name matches the profile. Keep delayed key/layer transitions monotonic and threadless; tests use fake clocks rather than sleeps.
 - Profiles are strict version `1` YAML. Fragments with the same device name merge before worker startup; duplicate keys, unknown fields/events/key names, and conflicts must retain source/path diagnostics.
 - Runtime profiles live outside the repository at `~/.config/macropad/profiles/`. Do not change user profiles unless explicitly requested.
+- After changing module ownership, dependency direction, process lifecycle, or runtime flow under `src/macropad/`, update `src/macropad/README.md`, including its Mermaid diagrams, so the architecture documentation remains accurate.
 
 ## Intentional Constraints
 

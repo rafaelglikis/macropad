@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import interceptor, profiles
+from . import worker as worker_runtime
+from .config import ProfileConfig
 
 RESTART_INITIAL_DELAY_SECONDS = 1.0
 RESTART_MAX_DELAY_SECONDS = 30.0
@@ -17,11 +19,11 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class PreparedProfile:
     paths: tuple[str, ...]
-    profile: profiles.Profile
+    config: ProfileConfig
 
     @property
     def device_name(self) -> str:
-        return self.profile.device
+        return self.config.device
 
 
 @dataclass
@@ -48,10 +50,8 @@ def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
     prepared_profiles = []
     for profile_fragments in profiles_by_device.values():
         paths = tuple(profile_path for profile_path, _ in profile_fragments)
-        profile = profiles.create_from_data(
-            profiles.merge_data([profile_data for _, profile_data in profile_fragments])
-        )
-        prepared_profiles.append(PreparedProfile(paths, profile))
+        config = profiles.merge_data([profile_data for _, profile_data in profile_fragments])
+        prepared_profiles.append(PreparedProfile(paths, config))
 
     return prepared_profiles
 
@@ -93,11 +93,7 @@ class ProfileSupervisor:
         start_errors = []
         for device_name, prepared_profile in prepared_by_device.items():
             current_worker = self.workers.get(device_name)
-            if (
-                current_worker
-                and current_worker.prepared_profile.profile.config
-                == prepared_profile.profile.config
-            ):
+            if current_worker and current_worker.prepared_profile.config == prepared_profile.config:
                 current_worker.prepared_profile = prepared_profile
                 continue
 
@@ -176,8 +172,8 @@ class ProfileSupervisor:
         prepared_profile = worker.prepared_profile
         worker.shutdown_event.clear()
         process = self._process_factory(
-            target=interceptor.listen,
-            args=(prepared_profile.profile, worker.shutdown_event),
+            target=worker_runtime.run,
+            args=(prepared_profile.config, worker.shutdown_event),
         )
         started = False
         try:

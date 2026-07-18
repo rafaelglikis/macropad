@@ -1,7 +1,6 @@
 import pickle
 import tempfile
 import unittest
-from types import SimpleNamespace
 
 import yaml
 
@@ -31,9 +30,9 @@ class ProfileTests(unittest.TestCase):
         return profile_data
 
     def test_generated_profile_can_be_serialized(self):
-        generated_profile = profiles.create_sample(SimpleNamespace(name='Demo Device'))
+        generated_profile = profiles.create_sample('Demo Device')
 
-        profile_data = yaml.safe_load(generated_profile.dump())
+        profile_data = yaml.safe_load(profiles.dump_yml(generated_profile))
 
         self.assertEqual('Demo Device', profile_data['device'])
         self.assertEqual('1', profile_data['version'])
@@ -65,9 +64,6 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(
             ('^default_layer',),
             profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions['up'],
-        )
-        self.assertIs(
-            profile_config.keyboard, profiles.create_from_data(profile_config).handler.config
         )
 
     def test_inline_and_top_level_layers_are_combined(self):
@@ -217,16 +213,6 @@ class ProfileTests(unittest.TestCase):
         restored_config = pickle.loads(pickle.dumps(profile_config))
 
         self.assertEqual(profile_config, restored_config)
-
-    def test_profile_with_action_executor_remains_picklable(self):
-        profile_config = profiles.validate_profile_data(self._profile_data())
-        profile = profiles.create_from_data(profile_config)
-
-        restored_profile = pickle.loads(pickle.dumps(profile))
-
-        self.assertEqual(profile.config, restored_profile.config)
-        self.assertEqual('Demo Device', restored_profile.handler.device)
-        self.assertEqual('Demo Device', restored_profile.handler.action_executor.device)
 
     def test_merge_combines_typed_profile_fragments(self):
         first = profiles.validate_profile_data(
