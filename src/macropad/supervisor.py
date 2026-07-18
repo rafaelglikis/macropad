@@ -6,7 +6,6 @@ from typing import Any
 
 from . import interceptor, profiles
 
-
 RESTART_INITIAL_DELAY_SECONDS = 1.0
 RESTART_MAX_DELAY_SECONDS = 30.0
 RESTART_STABLE_SECONDS = 30.0
@@ -59,11 +58,11 @@ def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
 
 class ProfileSupervisor:
     def __init__(
-            self,
-            process_factory=None,
-            device_present=None,
-            clock=None,
-            shutdown_event_factory=None,
+        self,
+        process_factory=None,
+        device_present=None,
+        clock=None,
+        shutdown_event_factory=None,
     ):
         self._process_factory = process_factory or multiprocessing.Process
         self._device_present = device_present or interceptor.has_device
@@ -79,8 +78,7 @@ class ProfileSupervisor:
     def reload(self, profile_paths: list[str]) -> None:
         prepared_profiles = prepare_profiles(profile_paths)
         prepared_by_device = {
-            prepared_profile.device_name: prepared_profile
-            for prepared_profile in prepared_profiles
+            prepared_profile.device_name: prepared_profile for prepared_profile in prepared_profiles
         }
 
         removed_workers = [
@@ -96,8 +94,9 @@ class ProfileSupervisor:
         for device_name, prepared_profile in prepared_by_device.items():
             current_worker = self.workers.get(device_name)
             if (
-                    current_worker
-                    and current_worker.prepared_profile.profile.config == prepared_profile.profile.config
+                current_worker
+                and current_worker.prepared_profile.profile.config
+                == prepared_profile.profile.config
             ):
                 current_worker.prepared_profile = prepared_profile
                 continue
@@ -115,11 +114,10 @@ class ProfileSupervisor:
                 start_errors.append((device_name, error))
 
         if start_errors:
-            details = '; '.join(
-                f'{device_name}: {error}'
-                for device_name, error in start_errors
-            )
-            raise RuntimeError(f'Failed to start profile worker(s): {details}') from start_errors[0][1]
+            details = '; '.join(f'{device_name}: {error}' for device_name, error in start_errors)
+            raise RuntimeError(f'Failed to start profile worker(s): {details}') from start_errors[
+                0
+            ][1]
 
     def tick(self) -> None:
         now = self._clock()
@@ -127,9 +125,9 @@ class ProfileSupervisor:
             process = worker.process
             if process is not None and process.is_alive():
                 if (
-                        worker.failure_count
-                        and worker.started_at is not None
-                        and now - worker.started_at >= RESTART_STABLE_SECONDS
+                    worker.failure_count
+                    and worker.started_at is not None
+                    and now - worker.started_at >= RESTART_STABLE_SECONDS
                 ):
                     worker.failure_count = 0
                     worker.started_at = None

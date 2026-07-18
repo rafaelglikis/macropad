@@ -2,7 +2,6 @@ import logging
 import subprocess
 from dataclasses import dataclass
 
-
 DEFAULT_MAX_CONCURRENT_ACTIONS = 8
 logger = logging.getLogger(__name__)
 
@@ -15,10 +14,10 @@ class RunningAction:
 
 class ActionExecutor:
     def __init__(
-            self,
-            max_concurrent=DEFAULT_MAX_CONCURRENT_ACTIONS,
-            process_factory=None,
-            device=None,
+        self,
+        max_concurrent=DEFAULT_MAX_CONCURRENT_ACTIONS,
+        process_factory=None,
+        device=None,
     ):
         if max_concurrent < 1:
             raise ValueError('max_concurrent must be at least 1')

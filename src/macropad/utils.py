@@ -4,9 +4,8 @@ from importlib.resources import files
 
 import notify2
 
-
 DEFAULT_ICON = files('macropad').joinpath('assets/macropad.svg')
-DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".config" / "macropad" / "profiles"
+DEFAULT_CONFIG_DIR = pathlib.Path.home() / '.config' / 'macropad' / 'profiles'
 logger = logging.getLogger(__name__)
 
 

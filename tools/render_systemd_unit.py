@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = PROJECT_ROOT / 'systemd/macropad.service.in'
 OUTPUT_PATH = PROJECT_ROOT / 'tmp/macropad.service'

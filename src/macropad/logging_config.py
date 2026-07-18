@@ -1,6 +1,5 @@
 import logging
 
-
 CONTEXT_FIELDS = (
     'device',
     'device_info',

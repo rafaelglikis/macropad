@@ -2,7 +2,7 @@
 
 ## Status
 
-- Status: In progress
+- Status: Completed with deferred device work recorded below
 - Decision: Selected for incremental implementation
 - Created: 2026-07-18
 - Scope: End-to-end architecture, reliability, safety, operations, and testing
@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Add deterministic hold and repeat key-event coverage.
+No active increment remains. Revisit deferred device selectors and path rescanning only when a concrete need emerges.
 
 ### Phase 2, Increment 1: Completed
 
@@ -169,6 +169,16 @@ Add deterministic hold and repeat key-event coverage.
 - Document the workflow scope and expose its status in the README.
 - Verification: `actionlint` passes, uv 0.11.29 accepts the lockfile, all seventy-eight tests pass on the minimum and maximum supported Python versions, and package, systemd, compilation, and build checks pass locally.
 
+### Phase 4 Completion Increment: Completed
+
+- Add deterministic coverage for repeated down actions, hold resolution, and clean tap state after a hold.
+- Cover partial disconnect cleanup while another matching device remains healthy and reconnect after all matching paths are lost.
+- Add a bounded service lifecycle smoke test that verifies watched-profile startup and graceful SIGTERM shutdown without a desktop notification service.
+- Adopt Ruff for import ordering, bug-risk linting, and consistent formatting with local Make targets.
+- Enforce linting, formatting, and the service lifecycle smoke test in CI.
+- Preserve the explicit deferral of selector-based path rescanning while another matching device remains connected.
+- Verification: eighty-two unit tests pass, service lifecycle, wheel, and systemd smoke tests pass, Ruff reports all files formatted and lint-free, all Python files compile, and the patch has no whitespace errors.
+
 ## Current Architecture
 
 ```text
@@ -278,22 +288,22 @@ Control subprocess concurrency, logging, completion, and shutdown. Trusted shell
 
 ### Phase 4: Testing and CI
 
-Add deterministic coverage for:
+Deterministic coverage completed for:
 
-- Generated profile serialization.
-- Independent simultaneous keys and tap timing.
-- Hold and repeat behavior.
-- Profile validation and fragment conflicts.
-- Transactional reload failure.
-- Partial device disconnect and reconnect.
-- Worker failure and restart backoff.
-- Command failure, dry-run behavior, and concurrency limits.
-- Wheel installation in a clean virtual environment.
-- Console and `python -m macropad` entry points from an installed wheel.
-- Packaged asset availability outside the source checkout.
-- Generated systemd unit validation and service startup smoke testing.
+- [x] Generated profile serialization.
+- [x] Independent simultaneous keys and tap timing.
+- [x] Hold and repeat behavior.
+- [x] Profile validation and fragment conflicts.
+- [x] Transactional reload failure.
+- [x] Partial disconnect cleanup and full reconnect after all matching paths are lost.
+- [x] Worker failure and restart backoff.
+- [x] Command failure and concurrency limits.
+- [x] Wheel installation in a clean virtual environment.
+- [x] Console and `python -m macropad` entry points from an installed wheel.
+- [x] Packaged asset availability outside the source checkout.
+- [x] Generated systemd unit validation and service startup smoke testing.
 
-CI now covers supported Python versions, unit tests, package integration, wheel building, compilation, systemd validation, and lockfile validation. Add linting when a project-wide formatter and lint policy are selected.
+CI covers supported Python versions, unit tests, linting, formatting, service and package integration, wheel building, compilation, systemd validation, and lockfile validation.
 
 ## Decision Criteria
 

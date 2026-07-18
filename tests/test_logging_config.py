@@ -23,7 +23,7 @@ class ContextFormatterTests(unittest.TestCase):
         message = formatter.format(record)
 
         self.assertEqual(
-            "WARNING macropad.actions action exited "
+            'WARNING macropad.actions action exited '
             "device='Macro Keyboard' command='demo-command' exit_status=7",
             message,
         )

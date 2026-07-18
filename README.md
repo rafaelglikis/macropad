@@ -71,8 +71,12 @@ Use `make status`, `make logs`, and `make restart` to manage it.
 ```bash
 make test
 make test-wheel
+make test-service
 make test-systemd
+make lint
 make build
 ```
 
-CI runs the unit suite on Python 3.10 through 3.14, verifies the lockfile, wheel installation, packaged assets, systemd unit, and distribution build.
+Run `make format` to apply the Ruff lint and formatting policy.
+
+CI runs the unit suite on Python 3.10 through 3.14, verifies linting, formatting, the lockfile, wheel installation, packaged assets, service lifecycle, systemd unit, and distribution build.

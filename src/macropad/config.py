@@ -2,7 +2,6 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
-
 Key = TypeVar('Key')
 Value = TypeVar('Value')
 
@@ -11,8 +10,8 @@ class FrozenDict(Mapping[Key, Value], Generic[Key, Value]):
     __slots__ = ('_items',)
 
     def __init__(
-            self,
-            values: Mapping[Key, Value] | Iterable[tuple[Key, Value]] = (),
+        self,
+        values: Mapping[Key, Value] | Iterable[tuple[Key, Value]] = (),
     ):
         object.__setattr__(self, '_items', tuple(dict(values).items()))
 
@@ -52,16 +51,16 @@ class BindingConfig:
     actions: FrozenDict[str, tuple[str, ...]]
 
     def __post_init__(self):
-        object.__setattr__(self, 'actions', FrozenDict(
-            (event_name, tuple(commands))
-            for event_name, commands in self.actions.items()
-        ))
+        object.__setattr__(
+            self,
+            'actions',
+            FrozenDict(
+                (event_name, tuple(commands)) for event_name, commands in self.actions.items()
+            ),
+        )
 
     def to_data(self) -> dict:
-        return {
-            event_name: list(commands)
-            for event_name, commands in self.actions.items()
-        }
+        return {event_name: list(commands) for event_name, commands in self.actions.items()}
 
 
 @dataclass(frozen=True)
@@ -74,8 +73,7 @@ class LayerConfig:
     def to_data(self) -> dict:
         return {
             'bindings': {
-                key_name: binding.to_data()
-                for key_name, binding in self.bindings.items()
+                key_name: binding.to_data() for key_name, binding in self.bindings.items()
             },
         }
 
@@ -92,14 +90,12 @@ class KeyboardConfig:
     def to_data(self) -> dict:
         data = {
             'bindings': {
-                key_name: binding.to_data()
-                for key_name, binding in self.bindings.items()
+                key_name: binding.to_data() for key_name, binding in self.bindings.items()
             },
         }
         if self.layers:
             data['layers'] = {
-                layer_name: layer.to_data()
-                for layer_name, layer in self.layers.items()
+                layer_name: layer.to_data() for layer_name, layer in self.layers.items()
             }
         return data
 

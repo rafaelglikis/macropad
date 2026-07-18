@@ -6,7 +6,6 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -44,9 +43,7 @@ def main() -> None:
         )
         source_archives = list(dist_path.glob('macropad-*.tar.gz'))
         if len(source_archives) != 1:
-            raise RuntimeError(
-                f'expected one source archive, found {len(source_archives)}'
-            )
+            raise RuntimeError(f'expected one source archive, found {len(source_archives)}')
         wheels = list(dist_path.glob('macropad-*.whl'))
         if len(wheels) != 1:
             raise RuntimeError(f'expected one wheel, found {len(wheels)}')
@@ -65,9 +62,7 @@ def main() -> None:
                 raise RuntimeError(f'wheel is missing: {sorted(missing_members)}')
 
             entry_point_files = [
-                member
-                for member in members
-                if member.endswith('.dist-info/entry_points.txt')
+                member for member in members if member.endswith('.dist-info/entry_points.txt')
             ]
             if len(entry_point_files) != 1:
                 raise RuntimeError('wheel must contain one entry_points.txt file')
@@ -103,12 +98,12 @@ def main() -> None:
                 str(python_path),
                 '-c',
                 (
-                    "from importlib.resources import files; "
-                    "from pathlib import Path; "
-                    "import macropad; "
+                    'from importlib.resources import files; '
+                    'from pathlib import Path; '
+                    'import macropad; '
                     "asset = files('macropad').joinpath('assets/macropad.svg'); "
-                    "assert asset.is_file(); "
-                    "print(Path(macropad.__file__).resolve())"
+                    'assert asset.is_file(); '
+                    'print(Path(macropad.__file__).resolve())'
                 ),
             ],
             work_path,

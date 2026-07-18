@@ -9,7 +9,6 @@ from . import utils
 from .actions import ActionExecutor
 from .config import BindingConfig, KeyboardConfig
 
-
 EVENT_DEBOUNCE_SECONDS = 0.2
 DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
 logger = logging.getLogger(__name__)
@@ -38,19 +37,17 @@ class KeyboardHandler:
     """
 
     def __init__(
-            self,
-            config: KeyboardConfig,
-            clock=time.monotonic,
-            action_executor: ActionExecutor | None = None,
-            device: str | None = None,
+        self,
+        config: KeyboardConfig,
+        clock=time.monotonic,
+        action_executor: ActionExecutor | None = None,
+        device: str | None = None,
     ):
         self._clock = clock
         self.config = config
         self.device = device
         self.action_executor = (
-            action_executor
-            if action_executor is not None
-            else ActionExecutor(device=device)
+            action_executor if action_executor is not None else ActionExecutor(device=device)
         )
 
         self.active_layer = None
@@ -85,9 +82,8 @@ class KeyboardHandler:
 
         self.event_logs.setdefault(code, []).append(event)
         binding = current_bindings[code]
-        is_simple_binding = (
-            len(binding.actions) == 1
-            and binding.actions.keys().isdisjoint(DELAYED_EVENTS)
+        is_simple_binding = len(binding.actions) == 1 and binding.actions.keys().isdisjoint(
+            DELAYED_EVENTS
         )
         if is_simple_binding:
             self.handle_event_now(event, code, binding, layer_generation)
@@ -117,11 +113,7 @@ class KeyboardHandler:
         self.action_executor.tick()
         now = self._clock()
         due_codes = sorted(
-            (
-                code
-                for code, (deadline, _, _, _) in self._pending_events.items()
-                if deadline <= now
-            ),
+            (code for code, (deadline, _, _, _) in self._pending_events.items() if deadline <= now),
             key=lambda code: self._pending_events[code][0],
         )
         for code in due_codes:
@@ -134,7 +126,9 @@ class KeyboardHandler:
     def shutdown(self):
         self.action_executor.shutdown()
 
-    def handle_event_now(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
+    def handle_event_now(
+        self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None
+    ):
         if layer_generation is not None and layer_generation != self._layer_generation:
             self.event_logs.pop(code, None)
             return
@@ -194,11 +188,11 @@ class KeyboardHandler:
 
     def _finish_one_shot_layer(self, event, code, layer_generation):
         if (
-                event.event.value == event.key_up
-                and self.active_layer
-                and self.layer_once
-                and code == self._layer_once_key
-                and layer_generation == self._layer_generation
+            event.event.value == event.key_up
+            and self.active_layer
+            and self.layer_once
+            and code == self._layer_once_key
+            and layer_generation == self._layer_generation
         ):
             self.deactivate_layer()
 
@@ -220,7 +214,7 @@ class KeyboardHandler:
                     mode='once' if once else 'persistent',
                 ),
             )
-            utils.send_notification("Layer Activated", f"Layer '{layer_name}' is now active")
+            utils.send_notification('Layer Activated', f"Layer '{layer_name}' is now active")
         else:
             logger.warning(
                 'layer not found',
@@ -238,9 +232,9 @@ class KeyboardHandler:
         self._layer_once_key = None
         logger.info('layer deactivated', extra=self._context(layer=layer))
         if layer:
-            utils.send_notification("Layer Deactivated", f"Layer '{layer}' is now deactivated")
+            utils.send_notification('Layer Deactivated', f"Layer '{layer}' is now deactivated")
         else:
-            utils.send_notification("Layer Deactivated", "No layer was active")
+            utils.send_notification('Layer Deactivated', 'No layer was active')
 
     def _cancel_layer_deadline(self):
         self._layer_deadline = None
@@ -261,9 +255,9 @@ class KeyboardHandler:
     def _is_hold_event(self, e, event_logs):
         is_proper_hold_event = e.event.value == e.key_hold
         is_up_event_that_follows_hold_event = (
-                len(event_logs) >= 2
-                and event_logs[-2].event.value == e.key_hold
-                and event_logs[-2].event.code == e.event.code
+            len(event_logs) >= 2
+            and event_logs[-2].event.value == e.key_hold
+            and event_logs[-2].event.code == e.event.code
         )
 
         return is_proper_hold_event or is_up_event_that_follows_hold_event
@@ -281,7 +275,6 @@ class KeyboardHandler:
             if expected_event != recent_event.event.value:
                 return False
         return True
-
 
     def execute_handler_command(self, command, code):
         command_with_args = command.split(' ')

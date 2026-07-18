@@ -1,4 +1,4 @@
-.PHONY: install install-editable sync test test-wheel test-systemd build render-systemd systemd enable start restart stop status logs
+.PHONY: install install-editable sync test test-wheel test-service test-systemd lint format build render-systemd systemd enable start restart stop status logs
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
@@ -24,6 +24,17 @@ test:
 
 test-wheel:
 	uv run python tests/wheel_smoke.py
+
+test-service:
+	uv run python tests/service_smoke.py
+
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+
+format:
+	uv run ruff check --fix .
+	uv run ruff format .
 
 build:
 	uv build

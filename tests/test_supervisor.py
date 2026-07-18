@@ -137,7 +137,9 @@ class ProfileSupervisorTests(unittest.TestCase):
             profile_supervisor.start(['/profiles/macros.yml'])
         current_process = profile_supervisor.workers['Macro Keyboard'].process
 
-        with patch('macropad.supervisor.prepare_profiles', side_effect=ValueError('invalid profile')):
+        with patch(
+            'macropad.supervisor.prepare_profiles', side_effect=ValueError('invalid profile')
+        ):
             with self.assertRaisesRegex(ValueError, 'invalid profile'):
                 profile_supervisor.reload(['/profiles/broken.yml'])
 
@@ -172,8 +174,8 @@ class ProfileSupervisorTests(unittest.TestCase):
         current_process = profile_supervisor.workers['Macro Keyboard'].process
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[current_profile, added_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[current_profile, added_profile],
         ):
             profile_supervisor.reload(['/profiles/macros.yml', '/profiles/second.yml'])
 
@@ -186,8 +188,8 @@ class ProfileSupervisorTests(unittest.TestCase):
         removed_profile = self._prepared_profile('Second Keyboard')
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[retained_profile, removed_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[retained_profile, removed_profile],
         ):
             profile_supervisor.start(['/profiles/macros.yml', '/profiles/second.yml'])
         retained_process = profile_supervisor.workers['Macro Keyboard'].process
@@ -211,8 +213,8 @@ class ProfileSupervisorTests(unittest.TestCase):
         changed_profile = self._prepared_profile(config='new')
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[current_profile, unchanged_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[current_profile, unchanged_profile],
         ):
             profile_supervisor.start(['/profiles/macros.yml', '/profiles/second.yml'])
         current_process = profile_supervisor.workers['Macro Keyboard'].process
@@ -220,8 +222,8 @@ class ProfileSupervisorTests(unittest.TestCase):
         unchanged_process = profile_supervisor.workers['Second Keyboard'].process
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[changed_profile, unchanged_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[changed_profile, unchanged_profile],
         ):
             profile_supervisor.reload(['/profiles/macros.yml', '/profiles/second.yml'])
 
@@ -290,18 +292,20 @@ class ProfileSupervisorTests(unittest.TestCase):
         current_process = profile_supervisor.workers['Macro Keyboard'].process
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[current_profile, broken_profile, added_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[current_profile, broken_profile, added_profile],
         ):
             with self.assertRaisesRegex(
-                    RuntimeError,
-                    'Failed to start profile worker.*Broken Keyboard: start failed',
+                RuntimeError,
+                'Failed to start profile worker.*Broken Keyboard: start failed',
             ):
-                profile_supervisor.reload([
-                    '/profiles/macros.yml',
-                    '/profiles/broken.yml',
-                    '/profiles/second.yml',
-                ])
+                profile_supervisor.reload(
+                    [
+                        '/profiles/macros.yml',
+                        '/profiles/broken.yml',
+                        '/profiles/second.yml',
+                    ]
+                )
 
         self.assertIs(current_process, profile_supervisor.workers['Macro Keyboard'].process)
         self.assertFalse(current_process.terminated)
@@ -431,8 +435,8 @@ class ProfileSupervisorTests(unittest.TestCase):
         healthy_profile = self._prepared_profile('Second Keyboard')
 
         with patch(
-                'macropad.supervisor.prepare_profiles',
-                return_value=[failed_profile, healthy_profile],
+            'macropad.supervisor.prepare_profiles',
+            return_value=[failed_profile, healthy_profile],
         ):
             profile_supervisor.start(['/profiles/macros.yml', '/profiles/second.yml'])
         failed_worker = profile_supervisor.workers['Macro Keyboard']
@@ -525,12 +529,12 @@ class ProfilePreparationTests(unittest.TestCase):
         first_config = SimpleNamespace(device='Macro Keyboard')
 
         with (
-                patch(
-                    'macropad.supervisor.profiles.load_yml',
-                    side_effect=[first_config, ValueError('invalid second profile')],
-                ),
-                patch('macropad.supervisor.profiles.merge_data') as merge_data,
-                patch('macropad.supervisor.profiles.create_from_data') as create_from_data,
+            patch(
+                'macropad.supervisor.profiles.load_yml',
+                side_effect=[first_config, ValueError('invalid second profile')],
+            ),
+            patch('macropad.supervisor.profiles.merge_data') as merge_data,
+            patch('macropad.supervisor.profiles.create_from_data') as create_from_data,
         ):
             with self.assertRaisesRegex(ValueError, 'invalid second profile'):
                 supervisor.prepare_profiles(['/profiles/first.yml', '/profiles/second.yml'])

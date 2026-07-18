@@ -38,11 +38,7 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual('Demo Device', profile_data['device'])
         self.assertEqual('1', profile_data['version'])
         self.assertEqual(
-            {
-                'KEY_UP': {
-                    'up': ["notify-send Hey! 'Hello from macropad!'"]
-                }
-            },
+            {'KEY_UP': {'up': ["notify-send Hey! 'Hello from macropad!'"]}},
             profile_data['bindings'],
         )
 
@@ -70,18 +66,24 @@ class ProfileTests(unittest.TestCase):
             ('^default_layer',),
             profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions['up'],
         )
-        self.assertIs(profile_config.keyboard, profiles.create_from_data(profile_config).handler.config)
+        self.assertIs(
+            profile_config.keyboard, profiles.create_from_data(profile_config).handler.config
+        )
 
     def test_inline_and_top_level_layers_are_combined(self):
-        profile_config = profiles.validate_profile_data(self._profile_data(layers={
-            'mod': {
-                'bindings': {
-                    'KEY_A': {
-                        'down': 'layer-down-command',
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                layers={
+                    'mod': {
+                        'bindings': {
+                            'KEY_A': {
+                                'down': 'layer-down-command',
+                            },
+                        },
                     },
-                },
-            },
-        }))
+                }
+            )
+        )
 
         self.assertEqual(
             {
@@ -106,11 +108,13 @@ class ProfileTests(unittest.TestCase):
                 )
 
     def test_validation_reports_source_and_binding_path(self):
-        profile_data = self._profile_data(bindings={
-            'KEY_A': {
-                'tap': 'a-command',
-            },
-        })
+        profile_data = self._profile_data(
+            bindings={
+                'KEY_A': {
+                    'tap': 'a-command',
+                },
+            }
+        )
 
         with self.assertRaises(profiles.ProfileValidationError) as context:
             profiles.validate_profile_data(profile_data, source='broken.yml')
@@ -118,9 +122,11 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('broken.yml: bindings.KEY_A.tap: unsupported event', str(context.exception))
 
     def test_validation_rejects_unknown_key_name(self):
-        profile_data = self._profile_data(bindings={
-            'KEY_NOT_REAL': 'a-command',
-        })
+        profile_data = self._profile_data(
+            bindings={
+                'KEY_NOT_REAL': 'a-command',
+            }
+        )
 
         with self.assertRaises(profiles.ProfileValidationError) as context:
             profiles.validate_profile_data(profile_data, source='broken.yml')
@@ -131,11 +137,13 @@ class ProfileTests(unittest.TestCase):
         )
 
     def test_validation_rejects_non_string_actions(self):
-        profile_data = self._profile_data(bindings={
-            'KEY_A': {
-                'up': ['a-command', 42],
-            },
-        })
+        profile_data = self._profile_data(
+            bindings={
+                'KEY_A': {
+                    'up': ['a-command', 42],
+                },
+            }
+        )
 
         with self.assertRaises(profiles.ProfileValidationError) as context:
             profiles.validate_profile_data(profile_data, source='broken.yml')
@@ -146,16 +154,20 @@ class ProfileTests(unittest.TestCase):
         )
 
     def test_validation_rejects_invalid_handler_command(self):
-        profile_data = self._profile_data(bindings={
-            'KEY_A': {
-                'up': '^layer',
-            },
-        })
+        profile_data = self._profile_data(
+            bindings={
+                'KEY_A': {
+                    'up': '^layer',
+                },
+            }
+        )
 
         with self.assertRaises(profiles.ProfileValidationError) as context:
             profiles.validate_profile_data(profile_data, source='broken.yml')
 
-        self.assertIn('broken.yml: bindings.KEY_A.up: invalid handler command', str(context.exception))
+        self.assertIn(
+            'broken.yml: bindings.KEY_A.up: invalid handler command', str(context.exception)
+        )
 
     def test_load_yml_reports_filename_for_invalid_yaml(self):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yml') as file:

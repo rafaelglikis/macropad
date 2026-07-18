@@ -12,7 +12,6 @@ from .config import (
 )
 from .handlers import Handler, KeyboardHandler
 
-
 PROFILE_FIELDS = {'device', 'version', 'bindings', 'layers'}
 EVENT_NAMES = {'up', 'down', 'hold', 'double_tap', 'triple_tap'}
 KEY_NAMES = {
@@ -119,10 +118,10 @@ def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileCon
 
 
 def _parse_bindings(
-        bindings,
-        source: str,
-        path: str,
-        allow_inline_layers: bool = True,
+    bindings,
+    source: str,
+    path: str,
+    allow_inline_layers: bool = True,
 ) -> tuple[dict[str, BindingConfig], dict[str, LayerConfig]]:
     if not isinstance(bindings, dict):
         raise ProfileValidationError(source, path, 'expected a mapping of key names')
@@ -153,11 +152,11 @@ def _parse_bindings(
 
 
 def _parse_binding(
-        binding,
-        source: str,
-        path: str,
-        allow_inline_layers: bool,
-        allow_shorthand: bool = True,
+    binding,
+    source: str,
+    path: str,
+    allow_inline_layers: bool,
+    allow_shorthand: bool = True,
 ) -> tuple[BindingConfig, dict[str, BindingConfig]]:
     if isinstance(binding, str):
         if not allow_shorthand:
@@ -224,7 +223,9 @@ def _parse_layers(layers, source: str, path: str) -> dict[str, LayerConfig]:
         unknown_fields = set(layer) - {'bindings'}
         if unknown_fields:
             field_name = sorted(unknown_fields)[0]
-            raise ProfileValidationError(source, f'{layer_path}.{field_name}', 'unsupported layer field')
+            raise ProfileValidationError(
+                source, f'{layer_path}.{field_name}', 'unsupported layer field'
+            )
         if 'bindings' not in layer:
             raise ProfileValidationError(source, layer_path, 'missing bindings')
         bindings, _ = _parse_bindings(
@@ -246,10 +247,11 @@ def _parse_actions(actions, source: str, path: str) -> tuple[str, ...]:
     if isinstance(actions, str):
         return (_parse_action(actions, source, path),)
     if not isinstance(actions, list) or not actions:
-        raise ProfileValidationError(source, path, 'expected a command string or non-empty list of commands')
+        raise ProfileValidationError(
+            source, path, 'expected a command string or non-empty list of commands'
+        )
     return tuple(
-        _parse_action(action, source, f'{path}[{index}]')
-        for index, action in enumerate(actions)
+        _parse_action(action, source, f'{path}[{index}]') for index, action in enumerate(actions)
     )
 
 
@@ -263,18 +265,18 @@ def _parse_action(action, source: str, path: str) -> str:
     if command_parts == ['default_layer']:
         return action
     if (
-            len(command_parts) in (2, 3)
-            and command_parts[0] == 'layer'
-            and (len(command_parts) == 2 or command_parts[2] == 'once')
+        len(command_parts) in (2, 3)
+        and command_parts[0] == 'layer'
+        and (len(command_parts) == 2 or command_parts[2] == 'once')
     ):
         return action
     raise ProfileValidationError(source, path, f'invalid handler command {action!r}')
 
 
 def _merge_layers(
-        target_layers: dict[str, LayerConfig],
-        source_layers: dict[str, LayerConfig],
-        source_name: str,
+    target_layers: dict[str, LayerConfig],
+    source_layers: dict[str, LayerConfig],
+    source_name: str,
 ) -> dict[str, LayerConfig]:
     merged_layers = dict(target_layers)
     for layer_name, source_layer in source_layers.items():
@@ -298,10 +300,10 @@ def _merge_layers(
 
 
 def _merge_binding(
-        target: BindingConfig,
-        source: BindingConfig,
-        path: str,
-        source_name: str,
+    target: BindingConfig,
+    source: BindingConfig,
+    path: str,
+    source_name: str,
 ) -> BindingConfig:
     actions = dict(target.actions)
     for event_name, commands in source.actions.items():
@@ -374,9 +376,11 @@ def create_sample(device):
         version='1',
         keyboard=KeyboardConfig(
             bindings={
-                'KEY_UP': BindingConfig(actions={
-                    'up': ("notify-send Hey! 'Hello from macropad!'",),
-                }),
+                'KEY_UP': BindingConfig(
+                    actions={
+                        'up': ("notify-send Hey! 'Hello from macropad!'",),
+                    }
+                ),
             },
             layers={},
         ),

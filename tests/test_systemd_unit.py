@@ -3,7 +3,6 @@ from pathlib import Path
 
 from tools.render_systemd_unit import render_service
 
-
 TEMPLATE = """[Service]
 WorkingDirectory=@WORKING_DIRECTORY@
 ExecStart=@EXECUTABLE@ listen --watch

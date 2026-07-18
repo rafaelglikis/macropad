@@ -11,14 +11,13 @@ from typing import List
 
 import argcomplete
 import notify2
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from . import interceptor, profiles, utils
 from .logging_config import configure_logging
 from .supervisor import ProfileSupervisor
 from .utils import DEFAULT_CONFIG_DIR
-
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ def ensure_default_config():
 
     yml_files = list(DEFAULT_CONFIG_DIR.glob('*.yml'))
     if not yml_files:
-        sample_profile_path = DEFAULT_CONFIG_DIR / "sample_profile.yml"
+        sample_profile_path = DEFAULT_CONFIG_DIR / 'sample_profile.yml'
         sample_yml = """device: "Sample Device"
 version: '1'
 bindings:
@@ -71,7 +70,9 @@ bindings:
 """
         sample_profile_path.write_text(sample_yml)
         logger.info('sample profile created', extra={'path': str(sample_profile_path)})
-        logger.info('edit profiles in configuration directory', extra={'path': str(DEFAULT_CONFIG_DIR)})
+        logger.info(
+            'edit profiles in configuration directory', extra={'path': str(DEFAULT_CONFIG_DIR)}
+        )
         logger.info("run 'macropad detect --generate-profile' to create a device profile")
 
 
@@ -82,10 +83,14 @@ def get_profile_paths(args: argparse.Namespace) -> List[str]:
         for directory in args.profile_directories:
             dir_path = pathlib.Path(directory)
             if not dir_path.exists():
-                logger.warning('profile directory does not exist; skipping', extra={'path': directory})
+                logger.warning(
+                    'profile directory does not exist; skipping', extra={'path': directory}
+                )
                 continue
             if not dir_path.is_dir():
-                logger.warning('profile path is not a directory; skipping', extra={'path': directory})
+                logger.warning(
+                    'profile path is not a directory; skipping', extra={'path': directory}
+                )
                 continue
 
             yml_files = sorted(dir_path.glob('*.yml'))
@@ -98,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
     subparsers = parser.add_subparsers(title='Subcommands', dest='subcommand', required=True)
 
-    detect_subparser = subparsers.add_parser('detect', help="Detects input device")
+    detect_subparser = subparsers.add_parser('detect', help='Detects input device')
     detect_subparser.add_argument(
         '--generate-profile',
         help='Generates a profile for the given device.',
@@ -106,10 +111,13 @@ def parse_args() -> argparse.Namespace:
         dest='generate_profile',
     )
 
-    listen_subparser = subparsers.add_parser('listen', help="Intercept profile device")
-    listen_subparser.add_argument('profile_paths', nargs='*', help='Paths to your macropad profiles.')
+    listen_subparser = subparsers.add_parser('listen', help='Intercept profile device')
     listen_subparser.add_argument(
-        '--directory', '-d',
+        'profile_paths', nargs='*', help='Paths to your macropad profiles.'
+    )
+    listen_subparser.add_argument(
+        '--directory',
+        '-d',
         action='append',
         dest='profile_directories',
         help='Directory containing profile files (.yml). Can be specified multiple times.',
@@ -136,24 +144,24 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
             extra={'profiles': tuple(profile_paths), 'error': str(error)},
         )
         utils.send_notification(
-            title="Macropad Configuration Error",
-            message=f"Configuration reload failed: {error}",
+            title='Macropad Configuration Error',
+            message=f'Configuration reload failed: {error}',
         )
         return False
 
     worker_count = len(profile_supervisor.workers)
     logger.info('profiles reloaded', extra={'count': worker_count})
     utils.send_notification(
-        title="Macropad Configuration Updated",
-        message=f"Successfully reloaded {worker_count} profile(s)",
+        title='Macropad Configuration Updated',
+        message=f'Successfully reloaded {worker_count} profile(s)',
     )
     return True
 
 
 def run_supervision_cycle(
-        profile_supervisor: ProfileSupervisor,
-        args: argparse.Namespace,
-        reload_requests: queue.SimpleQueue,
+    profile_supervisor: ProfileSupervisor,
+    args: argparse.Namespace,
+    reload_requests: queue.SimpleQueue,
 ) -> None:
     changed_paths = drain_reload_requests(reload_requests)
     if changed_paths:
@@ -180,7 +188,13 @@ def main() -> int:
         args = parse_args()
         if args.subcommand == 'listen':
             install_shutdown_handler(shutdown_requested)
-            notify2.init('Macropad')
+            try:
+                notify2.init('Macropad')
+            except Exception as error:
+                logger.warning(
+                    'notification initialization failed; continuing without notifications',
+                    extra={'error': str(error)},
+                )
 
             using_default_config = False
             if not args.profile_paths and not args.profile_directories:
@@ -277,7 +291,7 @@ def detect(args: argparse.Namespace):
     counter = 0
     while filename.exists():
         counter += 1
-        filename = DEFAULT_CONFIG_DIR / f"profile_{counter}.yml"
+        filename = DEFAULT_CONFIG_DIR / f'profile_{counter}.yml'
 
     filename.write_text(profile_yml)
     logger.info('sample profile generated', extra={'path': str(filename)})

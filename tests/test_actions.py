@@ -53,9 +53,7 @@ class ActionExecutorTests(unittest.TestCase):
         for process in (successful_process, failed_process, running_process):
             process.poll.return_value = None
         executor = ActionExecutor(
-            process_factory=Mock(
-                side_effect=[successful_process, failed_process, running_process]
-            )
+            process_factory=Mock(side_effect=[successful_process, failed_process, running_process])
         )
         executor.submit('successful-command')
         executor.submit('failed-command')
@@ -87,9 +85,7 @@ class ActionExecutorTests(unittest.TestCase):
         )
 
     def test_submit_reports_process_start_failure(self):
-        executor = ActionExecutor(
-            process_factory=Mock(side_effect=OSError('cannot start process'))
-        )
+        executor = ActionExecutor(process_factory=Mock(side_effect=OSError('cannot start process')))
 
         with patch('macropad.actions.logger') as logger:
             submitted = executor.submit('broken-command')

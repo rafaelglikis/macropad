@@ -68,11 +68,17 @@ jobs:
       - name: Install project
         run: uv sync --frozen
 
+      - name: Check lint and formatting
+        run: make lint
+
       - name: Verify wheel installation
         run: uv run --frozen python tests/wheel_smoke.py
 
       - name: Verify systemd unit
         run: make test-systemd
+
+      - name: Verify service lifecycle
+        run: make test-service
 
       - name: Build distributions
         run: uv build
