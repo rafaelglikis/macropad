@@ -3,14 +3,14 @@ from dataclasses import dataclass
 import yaml
 from evdev import ecodes
 
-from configuration import (
+from .config import (
     BindingConfig,
     KeyboardConfig,
     LayerConfig,
     ProfileConfig,
     ProfileValidationError,
 )
-from handlers import Handler, KeyboardHandler
+from .handlers import Handler, KeyboardHandler
 
 
 PROFILE_FIELDS = {'device', 'version', 'bindings', 'layers'}

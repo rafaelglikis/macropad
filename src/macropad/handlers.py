@@ -4,8 +4,8 @@ from typing import Protocol
 import evdev
 from evdev import InputEvent, KeyEvent
 
-import utils
-from configuration import BindingConfig, KeyboardConfig
+from . import utils
+from .config import BindingConfig, KeyboardConfig
 
 
 EVENT_DEBOUNCE_SECONDS = 0.2

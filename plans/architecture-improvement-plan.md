@@ -54,6 +54,15 @@ This document records the selected architecture direction. Each increment remain
 
 Add stable structured device selectors while preserving attachment to all matching devices.
 
+### Package Structure Migration: Completed
+
+- Moved application modules into the `src/macropad` package.
+- Added module and `macropad` console entry points.
+- Added the uv build backend and packaged application assets.
+- Updated tests to import the installed package namespace.
+- Updated Makefile and systemd generation to use the package entry point.
+- Removed the obsolete `watch.sh` script.
+
 ## Current Architecture
 
 ```text
@@ -157,7 +166,7 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 3. Use Python logging with device, profile, key, and worker context.
 4. Return nonzero exit codes for startup and configuration failures.
 5. Add a real `[project.scripts]` entry point and a checked-in systemd unit template.
-6. Remove or repair `watch.sh` and align the Makefile target names.
+6. [x] Remove or repair `watch.sh` and align the Makefile target names.
 
 ### Phase 4: Testing and CI
 
@@ -171,8 +180,12 @@ Add deterministic coverage for:
 - Partial device disconnect and reconnect.
 - Worker failure and restart backoff.
 - Command failure, dry-run behavior, and concurrency limits.
+- Wheel installation in a clean virtual environment.
+- Console and `python -m macropad` entry points from an installed wheel.
+- Packaged asset availability outside the source checkout.
+- Generated systemd unit validation and service startup smoke testing.
 
-Add CI for supported Python versions with unit tests, compilation, linting, and lockfile validation.
+Add CI for supported Python versions with unit tests, integration tests, wheel building, compilation, linting, and lockfile validation.
 
 ## Decision Criteria
 

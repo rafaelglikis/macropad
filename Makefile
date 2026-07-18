@@ -1,9 +1,9 @@
-.PHONY: install sync systemd systemd-enable systemd-start systemd-stop systemd-status systemd-logs
+.PHONY: install sync test build systemd enable start restart stop status logs
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
-PROJECT_DIR := $(shell pwd)
-UV_PATH := $(shell which uv)
+PROJECT_DIR := $(CURDIR)
+UV_PATH := $(shell command -v uv)
 
 install:
 	@echo "Installing dependencies with uv..."
@@ -14,6 +14,12 @@ sync:
 	@echo "Syncing dependencies with uv..."
 	uv sync
 	@echo "✓ Dependencies synced"
+
+test:
+	uv run python -m unittest discover -v
+
+build:
+	uv build
 
 systemd:
 	@echo "Creating systemd user service..."
@@ -26,7 +32,7 @@ systemd:
 	@echo "Type=simple" >> $(SERVICE_FILE)
 	@echo "WorkingDirectory=$(PROJECT_DIR)" >> $(SERVICE_FILE)
 	@echo "Environment=PYTHONUNBUFFERED=1" >> $(SERVICE_FILE)
-	@echo "ExecStart=/bin/bash -lc '$(UV_PATH) run $(PROJECT_DIR)/main.py listen --watch'" >> $(SERVICE_FILE)
+	@echo "ExecStart=/bin/bash -lc '$(UV_PATH) run --project $(PROJECT_DIR) macropad listen --watch'" >> $(SERVICE_FILE)
 	@echo "Restart=on-failure" >> $(SERVICE_FILE)
 	@echo "RestartSec=5" >> $(SERVICE_FILE)
 	@echo "" >> $(SERVICE_FILE)
@@ -36,8 +42,8 @@ systemd:
 	@echo "✓ Systemd service created at $(SERVICE_FILE)"
 	@echo ""
 	@echo "To enable and start the service, run:"
-	@echo "  make systemd-enable"
-	@echo "  make systemd-start"
+	@echo "  make enable"
+	@echo "  make start"
 
 enable:
 	systemctl --user enable macropad.service

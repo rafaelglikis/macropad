@@ -11,10 +11,8 @@ import notify2
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
-import interceptor
-import profile
-import utils
-from utils import DEFAULT_CONFIG_DIR
+from . import interceptor, profiles, utils
+from .utils import DEFAULT_CONFIG_DIR
 
 class ProfileReloadHandler(FileSystemEventHandler):
     def __init__(self, reload_callback):
@@ -82,7 +80,7 @@ def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Pr
 
     for profile_path in profile_paths:
         try:
-            profile_data = profile.load_yml(profile_path)
+            profile_data = profiles.load_yml(profile_path)
             profiles_by_device.setdefault(profile_data.device, []).append((profile_path, profile_data))
         except Exception as e:
             print(f"Error loading profile {profile_path}: {e}")
@@ -90,8 +88,8 @@ def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Pr
     for device, profile_fragments in profiles_by_device.items():
         try:
             profile_paths_for_device = [profile_path for profile_path, _ in profile_fragments]
-            profile_obj = profile.create_from_data(
-                profile.merge_data([profile_data for _, profile_data in profile_fragments])
+            profile_obj = profiles.create_from_data(
+                profiles.merge_data([profile_data for _, profile_data in profile_fragments])
             )
             process = multiprocessing.Process(target=interceptor.listen, args=(profile_obj,))
             process.start()
@@ -138,8 +136,8 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='Watch profile directories for changes and automatically reload.',
     )
-    args = parser.parse_args()
     argcomplete.autocomplete(parser)
+    args = parser.parse_args()
 
     return args
 
@@ -236,7 +234,7 @@ def detect(args: argparse.Namespace):
     if not args.generate_profile:
         return
 
-    profile_yml = profile.create_sample(device).dump()
+    profile_yml = profiles.create_sample(device).dump()
     print('----------- Profile -----------')
     print(profile_yml)
     print('-------------------------------')

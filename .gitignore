@@ -4,3 +4,5 @@ venv
 __pycache__/
 profiles/*
 .venv
+dist/
+*.egg-info/

@@ -1,11 +1,12 @@
 import os
 import pathlib
 import subprocess
+from importlib.resources import files
 
 import notify2
 
 
-ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
+DEFAULT_ICON = files('macropad').joinpath('assets/macropad.svg')
 DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".config" / "macropad" / "profiles"
 
 def reap_zombie_processes(signum, frame):
@@ -41,7 +42,7 @@ def send_notification(title: str, message: str, icon_path: str = None):
         notification = notify2.Notification(
             summary=title,
             message=message,
-            icon=f"{ASSETS_DIR}/macropad.svg",
+            icon=str(icon_path or DEFAULT_ICON),
         )
         notification.show()
     except Exception as e:

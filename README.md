@@ -23,3 +23,42 @@ Then install the Python dependencies:
 ```bash
 make
 ```
+
+## Usage
+
+Listen using profiles from the default configuration directory:
+
+```bash
+uv run macropad listen
+```
+
+Detect a newly connected keyboard and generate a profile:
+
+```bash
+uv run macropad detect --generate-profile
+```
+
+The module entry point is also available:
+
+```bash
+uv run python -m macropad --help
+```
+
+## Service
+
+Install and start the systemd user service:
+
+```bash
+make systemd
+make enable
+make start
+```
+
+Use `make status`, `make logs`, and `make restart` to manage it.
+
+## Development
+
+```bash
+make test
+make build
+```

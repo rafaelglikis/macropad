@@ -3,8 +3,8 @@ from unittest.mock import call, patch
 
 from evdev import InputEvent, ecodes
 
-import profile
-from handlers import KeyboardHandler
+from macropad import profiles
+from macropad.handlers import KeyboardHandler
 
 
 class FakeClock:
@@ -20,14 +20,14 @@ class FakeClock:
 
 class KeyboardHandlerLayerTests(unittest.TestCase):
     def setUp(self):
-        self.run_command = patch('utils.daemonize_and_run_command').start()
-        self.send_notification = patch('utils.send_notification').start()
+        self.run_command = patch('macropad.utils.daemonize_and_run_command').start()
+        self.send_notification = patch('macropad.utils.send_notification').start()
         self.addCleanup(patch.stopall)
         self.clock = FakeClock()
 
     @staticmethod
     def _keyboard_config(bindings):
-        return profile.validate_profile_data({
+        return profiles.validate_profile_data({
             'device': 'Test Device',
             'version': 1,
             'bindings': bindings,
