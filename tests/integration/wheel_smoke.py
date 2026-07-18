@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from email.parser import Parser
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +70,26 @@ def main() -> None:
             entry_points = wheel.read(entry_point_files[0]).decode()
             if 'macropad = macropad.cli:main' not in entry_points:
                 raise RuntimeError('wheel does not declare the macropad console command')
+
+            license_files = [
+                member for member in members if member.endswith('.dist-info/licenses/LICENSE')
+            ]
+            if len(license_files) != 1:
+                raise RuntimeError('wheel must contain one MIT license file')
+
+            metadata_files = [
+                member for member in members if member.endswith('.dist-info/METADATA')
+            ]
+            if len(metadata_files) != 1:
+                raise RuntimeError('wheel must contain one METADATA file')
+            metadata = Parser().parsestr(wheel.read(metadata_files[0]).decode())
+            if metadata['License-Expression'] != 'MIT':
+                raise RuntimeError('wheel does not declare the MIT license')
+            if metadata['Description-Content-Type'] != 'text/markdown':
+                raise RuntimeError('wheel does not use README.md as its description')
+            project_urls = metadata.get_all('Project-URL', [])
+            if 'Repository, https://github.com/rafaelglikis/macropad' not in project_urls:
+                raise RuntimeError('wheel does not declare the repository URL')
 
         run(
             ['uv', 'venv', '--python', sys.executable, str(environment_path)],

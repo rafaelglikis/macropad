@@ -80,3 +80,7 @@ make build
 Run `make format` to apply the Ruff lint and formatting policy.
 
 CI runs the unit suite on Python 3.10 through 3.14, verifies linting, formatting, the lockfile, wheel installation, packaged assets, service lifecycle, systemd unit, and distribution build.
+
+## License
+
+Macropad is available under the [MIT License](LICENSE).
