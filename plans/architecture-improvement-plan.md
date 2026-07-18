@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Add clean-wheel coverage for the console and module entry points and packaged assets.
+Check in a systemd user-unit template and add generated-unit validation.
 
 ### Phase 2, Increment 1: Completed
 
@@ -141,6 +141,15 @@ Add clean-wheel coverage for the console and module entry points and packaged as
 - Updated tests to import the installed package namespace.
 - Updated Makefile and systemd generation to use the package entry point.
 - Removed the obsolete `watch.sh` script.
+
+### Package Verification Increment: Completed
+
+- Add an idempotent Make target for installing the project as an editable user-level uv tool.
+- Build a source archive and its wheel in a temporary directory, then install the wheel with runtime dependencies into an isolated environment.
+- Verify the wheel contains the package modules, console metadata, and notification icon.
+- Run both `macropad --help` and `python -m macropad --help` outside the source checkout and verify the installed package resource.
+- Add `make test-wheel` as the explicit packaging smoke-test target and document the editable install workflow.
+- Verification: seventy-six unit tests pass, all Python files compile, the isolated wheel smoke test passes, persistent wheel and source archives build, and the editable command runs from `/home/rafael/.local/bin/macropad`.
 
 ## Current Architecture
 
@@ -245,8 +254,9 @@ Control subprocess concurrency, logging, completion, and shutdown. Trusted shell
 2. Declined: keep trusted shell-string actions and do not add argument-array actions.
 3. [x] Use Python logging with device, profile, key, and worker context.
 4. [x] Return nonzero exit codes for startup and configuration failures.
-5. Add a real `[project.scripts]` entry point and a checked-in systemd unit template.
-6. [x] Remove or repair `watch.sh` and align the Makefile target names.
+5. [x] Add a real `[project.scripts]` entry point.
+6. Add a checked-in systemd unit template.
+7. [x] Remove or repair `watch.sh` and align the Makefile target names.
 
 ### Phase 4: Testing and CI
 

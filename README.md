@@ -24,6 +24,12 @@ Then install the Python dependencies:
 make
 ```
 
+Install `macropad` as a user-level editable command when developing locally:
+
+```bash
+make install-editable
+```
+
 ## Usage
 
 Listen using profiles from the default configuration directory:
@@ -60,5 +66,6 @@ Use `make status`, `make logs`, and `make restart` to manage it.
 
 ```bash
 make test
+make test-wheel
 make build
 ```

@@ -1,4 +1,4 @@
-.PHONY: install sync test build systemd enable start restart stop status logs
+.PHONY: install install-editable sync test test-wheel build systemd enable start restart stop status logs
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
@@ -9,6 +9,11 @@ install:
 	uv sync
 	@echo "✓ Dependencies installed"
 
+install-editable:
+	@echo "Installing macropad as an editable uv tool..."
+	uv tool install --editable --force "$(PROJECT_DIR)"
+	@echo "✓ Editable macropad tool installed"
+
 sync:
 	@echo "Syncing dependencies with uv..."
 	uv sync
@@ -16,6 +21,9 @@ sync:
 
 test:
 	uv run python -m unittest discover -v
+
+test-wheel:
+	uv run python tests/wheel_smoke.py
 
 build:
 	uv build
