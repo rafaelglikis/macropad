@@ -1,4 +1,3 @@
-import subprocess
 import threading
 from typing import Protocol
 
@@ -6,7 +5,6 @@ import evdev
 from evdev import InputEvent, KeyEvent
 
 import utils
-from utils import debounce
 
 
 class Handler(Protocol):
@@ -18,6 +16,10 @@ class Handler(Protocol):
         """
         :param e:  Event to handle
         """
+
+    @property
+    def raw_data(self) -> dict:
+        """Return the serializable handler configuration."""
 
 
 class KeyboardHandler:
@@ -50,7 +52,20 @@ class KeyboardHandler:
         self._layer_generation = 0
         self.dry_run = config.get('dry_run', False)
         self.notifications = config.get('notifications', False)
-        self.event_logs = []
+        self.event_logs = {}
+        self._event_timers = {}
+        self._event_timer_lock = threading.Lock()
+
+    @property
+    def raw_data(self) -> dict:
+        data = {'bindings': self.bindings}
+        if self.layers:
+            data['layers'] = self.layers
+        if self.dry_run:
+            data['dry_run'] = True
+        if self.notifications:
+            data['notifications'] = True
+        return data
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -69,7 +84,7 @@ class KeyboardHandler:
         if not self._claim_one_shot_layer(code):
             return
 
-        self.event_logs.append(event)
+        self.event_logs.setdefault(code, []).append(event)
         if isinstance(current_bindings[code], str):
             current_bindings[code] = {
                 'up': current_bindings[code]
@@ -87,22 +102,36 @@ class KeyboardHandler:
         print("Using base bindings")
         return self.bindings
 
-    @debounce(0.2)
     def handle_event(self, event: KeyEvent, code, current_bindings, layer_generation=None):
-        self.handle_event_now(event, code, current_bindings, layer_generation)
+        def handle_debounced_event():
+            with self._event_timer_lock:
+                if self._event_timers.get(code) is not timer:
+                    return
+                del self._event_timers[code]
+            self.handle_event_now(event, code, current_bindings, layer_generation)
+
+        timer = threading.Timer(0.2, handle_debounced_event)
+        timer.daemon = True
+        with self._event_timer_lock:
+            previous_timer = self._event_timers.get(code)
+            if previous_timer:
+                previous_timer.cancel()
+            self._event_timers[code] = timer
+        timer.start()
 
     def handle_event_now(self, event: KeyEvent, code, current_bindings, layer_generation=None):
         if layer_generation is not None and layer_generation != self._layer_generation:
+            self.event_logs.pop(code, None)
             return
 
         try:
             current_key_bindings = current_bindings[code]
-            event_value = self._map_event(event)
+            event_value = self._map_event(event, self.event_logs.get(code, []))
             only_has_key_for_down = len(current_key_bindings.keys()) == 1 and 'down' in current_key_bindings
             if only_has_key_for_down and event_value == 'hold':
                 event_value = 'down'
 
-            self.event_logs = []
+            self.event_logs.pop(code, None)
             if event_value not in current_key_bindings:
                 print(f"No keybinding found for '{event_value}' on {event}")
                 return
@@ -188,16 +217,24 @@ class KeyboardHandler:
             self._layer_timer.cancel()
             self._layer_timer = None
 
+    def _cancel_event_timers(self):
+        with self._event_timer_lock:
+            timers = list(self._event_timers.values())
+            self._event_timers.clear()
+        for timer in timers:
+            timer.cancel()
+        self.event_logs.clear()
+
     def _deactivate_layer_if_current(self, generation):
         if generation == self._layer_generation:
             self.deactivate_layer()
 
-    def _map_event(self, e: KeyEvent) -> str:
-        if self._is_hold_event(e):
+    def _map_event(self, e: KeyEvent, event_logs) -> str:
+        if self._is_hold_event(e, event_logs):
             return 'hold'
-        if self.is_nth_tap(e, 3):
+        if self.is_nth_tap(e, 3, event_logs):
             return 'triple_tap'
-        if self.is_nth_tap(e, 2):
+        if self.is_nth_tap(e, 2, event_logs):
             return 'double_tap'
         if e.event.value == e.key_up:
             return 'up'
@@ -205,19 +242,19 @@ class KeyboardHandler:
             return 'down'
         return ''
 
-    def _is_hold_event(self, e):
+    def _is_hold_event(self, e, event_logs):
         is_proper_hold_event = e.event.value == e.key_hold
         is_up_event_that_follows_hold_event = (
-                len(self.event_logs) >= 2
-                and self.event_logs[-2].event.value == e.key_hold
-                and self.event_logs[-2].event.code == e.event.code
+                len(event_logs) >= 2
+                and event_logs[-2].event.value == e.key_hold
+                and event_logs[-2].event.code == e.event.code
         )
 
         return is_proper_hold_event or is_up_event_that_follows_hold_event
 
-    def is_nth_tap(self, e, n):
+    def is_nth_tap(self, e, n, event_logs):
         history_length = 2 * n
-        recent_event_logs = self.event_logs[-history_length:]
+        recent_event_logs = event_logs[-history_length:]
         if len(recent_event_logs) < history_length:
             return False
         for i, recent_event in enumerate(recent_event_logs):
