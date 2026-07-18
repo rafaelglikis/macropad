@@ -53,7 +53,25 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Begin Phase 2 runtime reliability work.
+Restart only changed or failed device workers instead of reloading every profile process.
+
+### Phase 2, Increment 1: Completed
+
+- Watchdog callbacks now enqueue profile paths without mutating worker state.
+- The main supervision loop is the sole owner of reload execution.
+- Every profile file is parsed and every device configuration is merged before replacement begins.
+- Invalid reload candidates leave all current workers running.
+- Reload failures produce an error notification instead of a success notification.
+- Verification: thirty-four tests pass, including reload ownership and validation-first replacement coverage.
+
+### Phase 2, Increment 2: Completed
+
+- Extracted profile preparation and worker lifecycle into `supervisor.py`.
+- Added a `ProfileSupervisor` as the sole owner of process start, reload, health checks, joins, and shutdown.
+- Workers are now indexed by device name in preparation for per-device reconciliation.
+- Reduced `cli.py` to argument parsing, Watchdog setup, notifications, and main-loop dispatch.
+- Added supervisor ownership, invalid-candidate preservation, and shutdown tests.
+- Verification: thirty-six tests pass with unchanged replace-all reload behavior.
 
 ### Package Structure Migration: Completed
 
@@ -67,10 +85,10 @@ Begin Phase 2 runtime reliability work.
 ## Current Architecture
 
 ```text
-CLI -> YAML profiles -> process per device -> evdev grab
-    -> keyboard handler -> detached shell commands
+CLI -> Supervisor -> YAML profiles -> process per device -> evdev grab
+                  -> keyboard handler -> detached shell commands
 
-Profile watcher -> stop every worker -> reload all profiles
+Profile watcher -> request queue -> CLI -> Supervisor reload
 ```
 
 The project has a reasonable small-system flow, but device management, delayed key handling, process supervision, reloads, and command execution mutate live state across processes and threads without clear ownership.
@@ -152,8 +170,8 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 
 ### Phase 2: Runtime Reliability
 
-1. Queue watcher events instead of reloading from the watcher thread.
-2. Validate and merge the complete candidate configuration before stopping workers.
+1. [x] Queue watcher events instead of reloading from the watcher thread.
+2. [x] Validate and merge the complete candidate configuration before stopping workers.
 3. Restart only the failed or changed device worker.
 4. Add per-device exponential restart backoff.
 5. Replace abrupt termination with a shutdown event and bounded join.

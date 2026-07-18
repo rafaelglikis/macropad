@@ -1,7 +1,7 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
-import multiprocessing
 import pathlib
+import queue
 import signal
 import time
 from typing import List
@@ -12,11 +12,13 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from . import interceptor, profiles, utils
+from .supervisor import ProfileSupervisor
 from .utils import DEFAULT_CONFIG_DIR
 
+
 class ProfileReloadHandler(FileSystemEventHandler):
-    def __init__(self, reload_callback):
-        self.reload_callback = reload_callback
+    def __init__(self, reload_requests: queue.SimpleQueue):
+        self.reload_requests = reload_requests
         self.last_reload = 0
         self.debounce_seconds = 1.0
 
@@ -24,13 +26,21 @@ class ProfileReloadHandler(FileSystemEventHandler):
         if event.is_directory or not event.src_path.endswith('.yml'):
             return
 
-        current_time = time.time()
+        current_time = time.monotonic()
         if current_time - self.last_reload < self.debounce_seconds:
             return
 
         self.last_reload = current_time
-        print(f"Profile change detected: {event.src_path}")
-        self.reload_callback()
+        self.reload_requests.put(event.src_path)
+
+
+def drain_reload_requests(reload_requests: queue.SimpleQueue) -> list[str]:
+    changed_paths = []
+    while True:
+        try:
+            changed_paths.append(reload_requests.get_nowait())
+        except queue.Empty:
+            return changed_paths
 
 
 def ensure_default_config():
@@ -74,43 +84,6 @@ def get_profile_paths(args: argparse.Namespace) -> List[str]:
     return all_profile_paths
 
 
-def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Process]:
-    processes = []
-    profiles_by_device = {}
-
-    for profile_path in profile_paths:
-        try:
-            profile_data = profiles.load_yml(profile_path)
-            profiles_by_device.setdefault(profile_data.device, []).append((profile_path, profile_data))
-        except Exception as e:
-            print(f"Error loading profile {profile_path}: {e}")
-
-    for device, profile_fragments in profiles_by_device.items():
-        try:
-            profile_paths_for_device = [profile_path for profile_path, _ in profile_fragments]
-            profile_obj = profiles.create_from_data(
-                profiles.merge_data([profile_data for _, profile_data in profile_fragments])
-            )
-            process = multiprocessing.Process(target=interceptor.listen, args=(profile_obj,))
-            process.start()
-            processes.append(process)
-            if interceptor.has_device(profile_obj.device):
-                print(f"Started profile for {device}: {', '.join(profile_paths_for_device)}")
-            else:
-                print(f"Started profile for {device}: {', '.join(profile_paths_for_device)}. Waiting for device...")
-        except Exception as e:
-            print(f"Error loading profiles for {device}: {e}")
-    return processes
-
-
-def stop_all_processes(processes: List[multiprocessing.Process]):
-    for process in processes:
-        if process.is_alive():
-            process.terminate()
-    for process in processes:
-        process.join(timeout=5)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
     subparsers = parser.add_subparsers(title='Subcommands', dest='subcommand', required=True)
@@ -142,23 +115,33 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namespace) -> bool:
+    print("Reloading profiles...")
+    profile_paths = get_profile_paths(args)
+    try:
+        profile_supervisor.reload(profile_paths)
+    except Exception as error:
+        print(f"Reload aborted: {error}")
+        utils.send_notification(
+            title="Macropad Configuration Error",
+            message=f"Configuration reload failed: {error}",
+        )
+        return False
+
+    worker_count = len(profile_supervisor.workers)
+    print(f"Reloaded {worker_count} profile(s)")
+    utils.send_notification(
+        title="Macropad Configuration Updated",
+        message=f"Successfully reloaded {worker_count} profile(s)",
+    )
+    return True
+
+
 def main():
-    processes = []
     signal.signal(signal.SIGCHLD, utils.reap_zombie_processes)
     observer = None
-
-    def reload_profiles():
-        nonlocal processes
-        print("Reloading profiles...")
-        stop_all_processes(processes)
-        profile_paths = get_profile_paths(args)
-        processes = start_profile_processes(profile_paths)
-        print(f"Reloaded {len(processes)} profile(s)")
-
-        utils.send_notification(
-            title="Macropad Configuration Updated",
-            message=f"Successfully reloaded {len(processes)} profile(s)",
-        )
+    reload_requests = queue.SimpleQueue()
+    profile_supervisor = ProfileSupervisor()
 
     try:
         args = parse_args()
@@ -177,7 +160,11 @@ def main():
                 print("Error: No profile files found. Please add profile files to your directories.")
                 return
 
-            processes = start_profile_processes(all_profile_paths)
+            try:
+                profile_supervisor.start(all_profile_paths)
+            except Exception as error:
+                print(f"Error loading profiles: {error}")
+                return
 
             enable_watch = args.watch or using_default_config
             if enable_watch:
@@ -185,7 +172,7 @@ def main():
                     print("Warning: --watch flag requires --directory to be specified. Watch mode disabled.")
                 else:
                     observer = PollingObserver()
-                    event_handler = ProfileReloadHandler(reload_profiles)
+                    event_handler = ProfileReloadHandler(reload_requests)
 
                     for directory in args.profile_directories:
                         dir_path = pathlib.Path(directory)
@@ -204,16 +191,19 @@ def main():
                 try:
                     while True:
                         time.sleep(1)
-                        for process in processes:
-                            if not process.is_alive():
-                                print(f"Process {process.pid} died, reloading...")
-                                reload_profiles()
-                                break
+                        changed_paths = drain_reload_requests(reload_requests)
+                        if changed_paths:
+                            print(f"Profile changes detected: {', '.join(changed_paths)}")
+                            reload_profiles(profile_supervisor, args)
+                            continue
+                        failed_workers = profile_supervisor.failed_workers()
+                        if failed_workers:
+                            print(f"Process {failed_workers[0].process.pid} died, reloading...")
+                            reload_profiles(profile_supervisor, args)
                 except KeyboardInterrupt:
                     pass
             else:
-                for process in processes:
-                    process.join()
+                profile_supervisor.join()
 
         elif args.subcommand == 'detect':
             detect(args)
@@ -226,7 +216,7 @@ def main():
         if observer and observer.is_alive():
             observer.stop()
             observer.join()
-        stop_all_processes(processes)
+        profile_supervisor.shutdown()
 
 
 def detect(args: argparse.Namespace):
