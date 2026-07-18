@@ -86,9 +86,7 @@ def listen(profile):
     try:
         while True:
             current_time = time.time()
-            if current_time - last_scan >= 0.3:
-                last_scan = current_time
-
+            if not devices and current_time - last_scan >= 0.3:
                 for path in _matching_device_paths(profile.device):
                     if path in devices:
                         continue
@@ -105,11 +103,11 @@ def listen(profile):
                             raise
                         continue
                     devices[path] = device
+                last_scan = time.time()
 
             for path, device in list(devices.items()):
                 try:
-                    e = device.read_one()
-                    if e:
+                    while e := device.read_one():
                         profile.handler.handle(e)
                 except OSError as e:
                     if e.errno != 19:

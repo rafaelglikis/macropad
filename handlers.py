@@ -87,7 +87,6 @@ class KeyboardHandler:
     def handle_event(self, event: KeyEvent, code, current_bindings):
         self.handle_event_now(event, code, current_bindings)
 
-    @debounce(0.001)
     def handle_event_now(self, event: KeyEvent, code, current_bindings):
         if self.active_layer and code != self.layer_activation_key:
             self.layer_used = True
