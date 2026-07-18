@@ -1,5 +1,7 @@
 # Macropad
 
+[![CI](https://github.com/rafaelglikis/macropad/actions/workflows/ci.yml/badge.svg)](https://github.com/rafaelglikis/macropad/actions/workflows/ci.yml)
+
 Turn every keyboard into a macropad.
 
 ## Install
@@ -72,3 +74,5 @@ make test-wheel
 make test-systemd
 make build
 ```
+
+CI runs the unit suite on Python 3.10 through 3.14, verifies the lockfile, wheel installation, packaged assets, systemd unit, and distribution build.

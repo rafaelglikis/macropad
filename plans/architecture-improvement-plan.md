@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Add CI for unit tests, package verification, compilation, and lockfile validation.
+Add deterministic hold and repeat key-event coverage.
 
 ### Phase 2, Increment 1: Completed
 
@@ -159,6 +159,15 @@ Add CI for unit tests, package verification, compilation, and lockfile validatio
 - Install the exact validated artifact and reload the user manager through `make systemd`.
 - Document the template rendering and validation workflow.
 - Verification: seventy-eight unit tests pass, renderer regression coverage includes shell and systemd metacharacters, the rendered and installed units are identical, systemd validation passes, and the user service reports a successful active state with three workers.
+
+### CI Increment: Completed
+
+- Add a GitHub Actions matrix for Python 3.10 through 3.14 with frozen dependency installation, unit tests, and compilation checks.
+- Add a package and operations job for lockfile validation, isolated wheel installation, systemd unit validation, and distribution builds.
+- Upload built wheel and source archives as workflow artifacts.
+- Pin third-party actions to immutable release commits and pin the CI uv version.
+- Document the workflow scope and expose its status in the README.
+- Verification: `actionlint` passes, uv 0.11.29 accepts the lockfile, all seventy-eight tests pass on the minimum and maximum supported Python versions, and package, systemd, compilation, and build checks pass locally.
 
 ## Current Architecture
 
@@ -284,7 +293,7 @@ Add deterministic coverage for:
 - Packaged asset availability outside the source checkout.
 - Generated systemd unit validation and service startup smoke testing.
 
-Add CI for supported Python versions with unit tests, integration tests, wheel building, compilation, linting, and lockfile validation.
+CI now covers supported Python versions, unit tests, package integration, wheel building, compilation, systemd validation, and lockfile validation. Add linting when a project-wide formatter and lint policy are selected.
 
 ## Decision Criteria
 
