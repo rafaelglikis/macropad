@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 from evdev import InputEvent, ecodes
 
@@ -20,10 +20,11 @@ class FakeClock:
 
 class KeyboardHandlerLayerTests(unittest.TestCase):
     def setUp(self):
-        self.run_command = patch('macropad.utils.daemonize_and_run_command').start()
         self.send_notification = patch('macropad.utils.send_notification').start()
         self.addCleanup(patch.stopall)
         self.clock = FakeClock()
+        self.action_executor = Mock()
+        self.run_command = self.action_executor.submit
 
     @staticmethod
     def _keyboard_config(bindings):
@@ -45,6 +46,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                 },
             }),
             clock=self.clock,
+            action_executor=self.action_executor,
         )
 
     @staticmethod
@@ -221,6 +223,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                 },
             }),
             clock=self.clock,
+            action_executor=self.action_executor,
         )
 
         handler.handle(self._event(ecodes.KEY_A, 1))
@@ -245,6 +248,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                 },
             }),
             clock=self.clock,
+            action_executor=self.action_executor,
         )
 
         handler.handle(self._event(ecodes.KEY_A, 1))
@@ -270,6 +274,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                 },
             }),
             clock=self.clock,
+            action_executor=self.action_executor,
         )
 
         for _ in range(2):

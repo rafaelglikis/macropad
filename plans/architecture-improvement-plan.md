@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Use `selectors` for device descriptors and rescan paths while other matching devices remain connected.
+Preserve trusted shell-string actions and support explicit argument-array actions.
 
 ### Phase 2, Increment 1: Completed
 
@@ -107,6 +107,15 @@ Use `selectors` for device descriptors and rescan paths while other matching dev
 - Add coverage for graceful reload replacement, device cleanup, real-process shutdown, CLI signal handling, and forced fallback.
 - Verification: fifty-nine tests pass, all Python files compile, a systemd restart completes cleanly without status 143, and a directly signaled worker exits cooperatively before supervisor recovery.
 
+### Phase 3, Increment 1: Completed
+
+- Add a handler-owned action executor with an eight-process concurrency limit per device worker.
+- Drop and report new actions at the limit instead of queuing stale key presses.
+- Poll action processes from the handler tick and report every command's exit status.
+- Preserve detached trusted shell-string execution and explicitly detach running actions during worker shutdown.
+- Remove process-global command tracking from `utils.py` and listener-level command cleanup.
+- Verification: sixty-three tests pass, all Python files compile, the active service runs three workers, and a real shell command reports its nonzero exit status.
+
 ### Package Structure Migration: Completed
 
 - Moved application modules into the `src/macropad` package.
@@ -120,7 +129,7 @@ Use `selectors` for device descriptors and rescan paths while other matching dev
 
 ```text
 CLI -> Supervisor -> YAML profiles -> process per device -> evdev grab
-                  -> keyboard handler -> detached shell commands
+                  -> keyboard handler -> bounded action executor -> detached shell commands
 
 Profile watcher -> request queue -> CLI -> Supervisor reload
 ```
@@ -210,11 +219,11 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 4. [x] Add per-device exponential restart backoff.
 5. [x] Replace abrupt termination with a shutdown event and bounded join.
 6. [x] Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
-7. Use `selectors` for device descriptors and rescan paths even when other devices remain connected.
+7. Deferred: use `selectors` for device descriptors and rescan paths even when other devices remain connected.
 
 ### Phase 3: Commands and Operations
 
-1. Add a bounded action executor that tracks subprocesses and logs exit status.
+1. [x] Add a bounded action executor that tracks subprocesses and logs exit status.
 2. Preserve trusted shell-string actions for compatibility and support explicit argument-array actions.
 3. Use Python logging with device, profile, key, and worker context.
 4. Return nonzero exit codes for startup and configuration failures.

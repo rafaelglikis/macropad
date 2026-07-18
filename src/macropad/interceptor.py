@@ -4,9 +4,6 @@ import time
 import evdev
 from evdev import InputDevice
 
-from . import utils
-
-
 def install_shutdown_handler(shutdown_event) -> None:
     def request_shutdown(signum, frame):
         shutdown_event.set()
@@ -113,8 +110,8 @@ def listen(profile, shutdown_event):
                     del devices[path]
 
             profile.handler.tick()
-            utils.reap_finished_commands()
             time.sleep(0.01)
     finally:
         for device in devices.values():
             device.close()
+        profile.handler.shutdown()

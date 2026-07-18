@@ -5,6 +5,7 @@ import evdev
 from evdev import InputEvent, KeyEvent
 
 from . import utils
+from .actions import ActionExecutor
 from .config import BindingConfig, KeyboardConfig
 
 
@@ -25,15 +26,24 @@ class Handler(Protocol):
     def tick(self) -> None:
         """Process delayed state transitions that are ready to run."""
 
+    def shutdown(self) -> None:
+        """Release resources owned by the handler."""
+
 
 class KeyboardHandler:
     """
     Handles keyboard events
     """
 
-    def __init__(self, config: KeyboardConfig, clock=time.monotonic):
+    def __init__(
+            self,
+            config: KeyboardConfig,
+            clock=time.monotonic,
+            action_executor: ActionExecutor | None = None,
+    ):
         self._clock = clock
         self.config = config
+        self.action_executor = action_executor if action_executor is not None else ActionExecutor()
 
         self.active_layer = None
         self.layer_activation_key = None
@@ -90,6 +100,7 @@ class KeyboardHandler:
         )
 
     def tick(self):
+        self.action_executor.tick()
         now = self._clock()
         due_codes = sorted(
             (
@@ -105,6 +116,9 @@ class KeyboardHandler:
 
         if self._layer_deadline is not None and self._layer_deadline <= now:
             self.deactivate_layer()
+
+    def shutdown(self):
+        self.action_executor.shutdown()
 
     def handle_event_now(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
         if layer_generation is not None and layer_generation != self._layer_generation:
@@ -128,7 +142,7 @@ class KeyboardHandler:
                     self.execute_handler_command(command[1:], code)
                 else:
                     print(f"Executing command '{command}' for '{event_value}' on {event}")
-                    utils.daemonize_and_run_command(command)
+                    self.action_executor.submit(command)
         finally:
             self._finish_one_shot_layer(event, code, layer_generation)
 

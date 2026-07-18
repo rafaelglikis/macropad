@@ -68,7 +68,7 @@ class ListenerTests(unittest.TestCase):
         install_signal.assert_called_once_with(signal.SIGTERM, handler)
         self.assertTrue(shutdown_event.is_set())
 
-    def test_listener_reaps_finished_commands_each_cycle(self):
+    def test_listener_ticks_and_shuts_down_handler(self):
         profile = SimpleNamespace(
             device='Macro Keyboard',
             handler=Mock(),
@@ -79,14 +79,13 @@ class ListenerTests(unittest.TestCase):
         with (
                 patch('macropad.interceptor.install_shutdown_handler'),
                 patch('macropad.interceptor._matching_device_paths', return_value=[]),
-                patch('macropad.interceptor.utils.reap_finished_commands') as reap_commands,
                 patch('macropad.interceptor.time.sleep', side_effect=KeyboardInterrupt),
         ):
             with self.assertRaises(KeyboardInterrupt):
                 interceptor.listen(profile, shutdown_event)
 
         profile.handler.tick.assert_called_once_with()
-        reap_commands.assert_called_once_with()
+        profile.handler.shutdown.assert_called_once_with()
 
     def test_shutdown_event_closes_grabbed_devices(self):
         shutdown_event = threading.Event()
@@ -106,6 +105,7 @@ class ListenerTests(unittest.TestCase):
 
         self.assertTrue(device.grabbed)
         self.assertTrue(device.closed)
+        profile.handler.shutdown.assert_called_once_with()
 
 
 if __name__ == '__main__':
