@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Check in a systemd user-unit template and add generated-unit validation.
+Add CI for unit tests, package verification, compilation, and lockfile validation.
 
 ### Phase 2, Increment 1: Completed
 
@@ -150,6 +150,15 @@ Check in a systemd user-unit template and add generated-unit validation.
 - Run both `macropad --help` and `python -m macropad --help` outside the source checkout and verify the installed package resource.
 - Add `make test-wheel` as the explicit packaging smoke-test target and document the editable install workflow.
 - Verification: seventy-six unit tests pass, all Python files compile, the isolated wheel smoke test passes, persistent wheel and source archives build, and the editable command runs from `/home/rafael/.local/bin/macropad`.
+
+### Systemd Unit Template Increment: Completed
+
+- Replace Makefile-generated unit fragments with a checked-in service template.
+- Render the current checkout path with context-specific systemd escaping into an ignored unit artifact and validate it before installation.
+- Add `make test-systemd` for direct validation with the user-level systemd parser.
+- Install the exact validated artifact and reload the user manager through `make systemd`.
+- Document the template rendering and validation workflow.
+- Verification: seventy-eight unit tests pass, renderer regression coverage includes shell and systemd metacharacters, the rendered and installed units are identical, systemd validation passes, and the user service reports a successful active state with three workers.
 
 ## Current Architecture
 
@@ -255,7 +264,7 @@ Control subprocess concurrency, logging, completion, and shutdown. Trusted shell
 3. [x] Use Python logging with device, profile, key, and worker context.
 4. [x] Return nonzero exit codes for startup and configuration failures.
 5. [x] Add a real `[project.scripts]` entry point.
-6. Add a checked-in systemd unit template.
+6. [x] Add a checked-in systemd unit template.
 7. [x] Remove or repair `watch.sh` and align the Makefile target names.
 
 ### Phase 4: Testing and CI

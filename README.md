@@ -60,6 +60,8 @@ make enable
 make start
 ```
 
+`make systemd` renders the checked-in unit template for the current checkout and validates it before installation.
+
 Use `make status`, `make logs`, and `make restart` to manage it.
 
 ## Development
@@ -67,5 +69,6 @@ Use `make status`, `make logs`, and `make restart` to manage it.
 ```bash
 make test
 make test-wheel
+make test-systemd
 make build
 ```

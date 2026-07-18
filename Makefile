@@ -1,8 +1,8 @@
-.PHONY: install install-editable sync test test-wheel build systemd enable start restart stop status logs
+.PHONY: install install-editable sync test test-wheel test-systemd build render-systemd systemd enable start restart stop status logs
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
-PROJECT_DIR := $(CURDIR)
+RENDERED_SERVICE_FILE := tmp/macropad.service
 
 install:
 	@echo "Installing dependencies with uv..."
@@ -11,7 +11,7 @@ install:
 
 install-editable:
 	@echo "Installing macropad as an editable uv tool..."
-	uv tool install --editable --force "$(PROJECT_DIR)"
+	uv tool install --editable --force .
 	@echo "✓ Editable macropad tool installed"
 
 sync:
@@ -28,25 +28,17 @@ test-wheel:
 build:
 	uv build
 
-systemd:
+render-systemd:
+	@echo "Rendering systemd user service..."
+	uv run python tools/render_systemd_unit.py
+
+test-systemd: render-systemd
+	systemd-analyze --user verify "$(RENDERED_SERVICE_FILE)"
+	@echo "✓ Systemd user service is valid"
+
+systemd: test-systemd
 	@echo "Creating systemd user service..."
-	@mkdir -p $(SYSTEMD_USER_DIR)
-	@echo "[Unit]" > $(SERVICE_FILE)
-	@echo "Description=Macropad Keyboard Interceptor" >> $(SERVICE_FILE)
-	@echo "After=default.target" >> $(SERVICE_FILE)
-	@echo "" >> $(SERVICE_FILE)
-	@echo "[Service]" >> $(SERVICE_FILE)
-	@echo "Type=simple" >> $(SERVICE_FILE)
-	@echo "WorkingDirectory=$(PROJECT_DIR)" >> $(SERVICE_FILE)
-	@echo "Environment=PYTHONUNBUFFERED=1" >> $(SERVICE_FILE)
-	@echo "ExecStart=$(PROJECT_DIR)/.venv/bin/macropad listen --watch" >> $(SERVICE_FILE)
-	@echo "KillMode=mixed" >> $(SERVICE_FILE)
-	@echo "TimeoutStopSec=10" >> $(SERVICE_FILE)
-	@echo "Restart=on-failure" >> $(SERVICE_FILE)
-	@echo "RestartSec=5" >> $(SERVICE_FILE)
-	@echo "" >> $(SERVICE_FILE)
-	@echo "[Install]" >> $(SERVICE_FILE)
-	@echo "WantedBy=default.target" >> $(SERVICE_FILE)
+	install -Dm644 "$(RENDERED_SERVICE_FILE)" "$(SERVICE_FILE)"
 	@systemctl --user daemon-reload
 	@echo "✓ Systemd service created at $(SERVICE_FILE)"
 	@echo ""
