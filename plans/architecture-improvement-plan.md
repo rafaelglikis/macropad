@@ -13,6 +13,7 @@ This document records the selected architecture direction. Each increment remain
 
 - Deliver Phase 1 in small, independently verified increments.
 - Preserve the behavior where a profile attaches to all matching devices.
+- Match devices by keyboard name only; structured hardware selectors are deferred until needed.
 - Remove the unused `dry_run` and `notifications` options instead of implementing them.
 - Validate automated changes on a physical macropad after tests pass.
 
@@ -52,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Add stable structured device selectors while preserving attachment to all matching devices.
+Begin Phase 2 runtime reliability work.
 
 ### Package Structure Migration: Completed
 
@@ -128,7 +129,7 @@ Make one component solely responsible for starting, stopping, replacing, and mon
 
 ### Device Session
 
-Own device descriptors, grabs, reconnect behavior, and stable hardware matching. Use structured hardware attributes instead of name alone while intentionally attaching to every device that matches the selector.
+Own device descriptors, grabs, and reconnect behavior. Device matching remains name-only until a concrete need for structured hardware selectors emerges.
 
 ### Binding Engine
 
@@ -144,10 +145,10 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 
 1. [x] Fix profile serialization and add a generated-profile regression test.
 2. [x] Replace the global debounce timer with per-key state.
-3. [x] Run key-state transitions on one thread using monotonic deadlines or `tick(now)`.
+3. [x] Run key-state transitions on one thread using monotonic deadlines or `tick(now)`
 4. [x] Add dataclass-based profile validation with precise diagnostics.
 5. [x] Remove the unused `dry_run` and `notifications` options.
-6. Generate stable structured selectors while preserving attachment to all matching devices.
+6. Deferred: keep name-only matching and revisit structured selectors if a concrete need emerges.
 
 ### Phase 2: Runtime Reliability
 

@@ -4,22 +4,7 @@ import evdev
 from evdev import InputDevice
 
 
-def _find_device(device_id: str) -> list[InputDevice]:
-    devices = [InputDevice(path) for path in evdev.list_devices()]
-
-    devices_to_return = []
-    for device in devices:
-        if device.name == device_id or device.path == device_id:
-            print_device_info(device)
-            devices_to_return.append(device)
-
-    if not devices_to_return:
-        raise NameError(f"Device not found: {device_id}")
-
-    return devices_to_return
-
-
-def _matching_device_paths(device_id: str) -> list[str]:
+def _matching_device_paths(device_name: str) -> list[str]:
     matching_paths = []
 
     for path in evdev.list_devices():
@@ -29,7 +14,7 @@ def _matching_device_paths(device_id: str) -> list[str]:
             continue
 
         try:
-            if device.name == device_id or device.path == device_id:
+            if device.name == device_name:
                 matching_paths.append(path)
         finally:
             device.close()
@@ -37,11 +22,11 @@ def _matching_device_paths(device_id: str) -> list[str]:
     return matching_paths
 
 
-def has_device(device_id: str) -> bool:
+def has_device(device_name: str) -> bool:
     for path in evdev.list_devices():
         device = InputDevice(path)
         try:
-            matches = device.name == device_id or device.path == device_id
+            matches = device.name == device_name
         finally:
             device.close()
 
