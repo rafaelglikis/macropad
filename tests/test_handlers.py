@@ -1,4 +1,3 @@
-import time
 import unittest
 from unittest.mock import call, patch
 
@@ -7,33 +6,39 @@ from evdev import InputEvent, ecodes
 from handlers import KeyboardHandler
 
 
+class FakeClock:
+    def __init__(self):
+        self.current_time = 0.0
+
+    def __call__(self):
+        return self.current_time
+
+    def advance(self, seconds):
+        self.current_time += seconds
+
+
 class KeyboardHandlerLayerTests(unittest.TestCase):
     def setUp(self):
         self.run_command = patch('utils.daemonize_and_run_command').start()
         self.send_notification = patch('utils.send_notification').start()
         self.addCleanup(patch.stopall)
-        self.handlers = []
-        self.addCleanup(self._cancel_handler_timers)
-
-    def _cancel_handler_timers(self):
-        for handler in self.handlers:
-            handler._cancel_layer_timer()
-            handler._cancel_event_timers()
+        self.clock = FakeClock()
 
     def _create_handler(self, layer_binding):
-        handler = KeyboardHandler({
-            'bindings': {
-                'KEY_SPACE': {'up': '^layer mod once'},
-                'KEY_T': {
-                    'up': 'base-command',
-                    'layers': {
-                        'mod': layer_binding,
+        return KeyboardHandler(
+            {
+                'bindings': {
+                    'KEY_SPACE': {'up': '^layer mod once'},
+                    'KEY_T': {
+                        'up': 'base-command',
+                        'layers': {
+                            'mod': layer_binding,
+                        },
                     },
                 },
             },
-        })
-        self.handlers.append(handler)
-        return handler
+            clock=self.clock,
+        )
 
     @staticmethod
     def _event(code, value):
@@ -43,6 +48,10 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_SPACE, 1))
         handler.handle(self._event(ecodes.KEY_SPACE, 0))
         self.assertEqual('mod', handler.active_layer)
+
+    def _advance(self, handler, seconds):
+        self.clock.advance(seconds)
+        handler.tick()
 
     def test_one_shot_up_binding_stays_active_until_key_release(self):
         handler = self._create_handler({'up': ['layer-command-1', 'layer-command-2']})
@@ -86,7 +95,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         handler.deactivate_layer()
         handler.activate_layer('mod', 'KEY_SPACE')
-        time.sleep(0.3)
+        self._advance(handler, 0.3)
 
         self.run_command.assert_not_called()
         self.assertEqual('mod', handler.active_layer)
@@ -96,9 +105,19 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.activate_layer('mod', 'KEY_SPACE', once=True, deactivate_after=0.05)
 
         handler.activate_layer('mod', 'KEY_SPACE')
-        time.sleep(0.1)
+        self._advance(handler, 0.1)
 
         self.assertEqual('mod', handler.active_layer)
+
+    def test_one_shot_layer_deactivates_when_deadline_passes(self):
+        handler = self._create_handler({'up': 'layer-command'})
+        handler.activate_layer('mod', 'KEY_SPACE', once=True, deactivate_after=0.05)
+
+        self._advance(handler, 0.04)
+        self.assertEqual('mod', handler.active_layer)
+
+        self._advance(handler, 0.02)
+        self.assertIsNone(handler.active_layer)
 
     def test_one_shot_hold_binding_deactivates_after_debounced_release(self):
         handler = self._create_handler({
@@ -110,7 +129,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_T, 1))
         handler.handle(self._event(ecodes.KEY_T, 2))
         handler.handle(self._event(ecodes.KEY_T, 0))
-        time.sleep(0.3)
+        self._advance(handler, 0.3)
 
         self.run_command.assert_called_once_with('layer-hold-command')
         self.assertIsNone(handler.active_layer)
@@ -126,7 +145,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_T, 0))
         handler.handle(self._event(ecodes.KEY_T, 1))
         handler.handle(self._event(ecodes.KEY_T, 0))
-        time.sleep(0.3)
+        self._advance(handler, 0.3)
 
         self.run_command.assert_called_once_with('layer-double-tap-command')
         self.assertIsNone(handler.active_layer)
@@ -136,7 +155,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.activate_layer('mod', 'KEY_SPACE', once=True, deactivate_after=0.05)
 
         handler.handle(self._event(ecodes.KEY_T, 1))
-        time.sleep(0.1)
+        self._advance(handler, 0.1)
 
         self.assertEqual('mod', handler.active_layer)
 
@@ -146,52 +165,81 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.assertIsNone(handler.active_layer)
 
     def test_debounce_is_independent_for_each_key(self):
-        handler = KeyboardHandler({
-            'bindings': {
-                'KEY_A': {
-                    'up': 'a-command',
-                    'double_tap': 'a-double-tap-command',
-                },
-                'KEY_B': {
-                    'up': 'b-command',
-                    'double_tap': 'b-double-tap-command',
+        handler = KeyboardHandler(
+            {
+                'bindings': {
+                    'KEY_A': {
+                        'up': 'a-command',
+                        'double_tap': 'a-double-tap-command',
+                    },
+                    'KEY_B': {
+                        'up': 'b-command',
+                        'double_tap': 'b-double-tap-command',
+                    },
                 },
             },
-        })
-        self.handlers.append(handler)
+            clock=self.clock,
+        )
 
         handler.handle(self._event(ecodes.KEY_A, 1))
         handler.handle(self._event(ecodes.KEY_A, 0))
         handler.handle(self._event(ecodes.KEY_B, 1))
         handler.handle(self._event(ecodes.KEY_B, 0))
-        time.sleep(0.3)
+        self.run_command.assert_not_called()
+
+        self._advance(handler, 0.3)
 
         self.assertCountEqual(
             [call('a-command'), call('b-command')],
             self.run_command.call_args_list,
         )
 
-    def test_tap_history_is_independent_for_each_key(self):
-        handler = KeyboardHandler({
-            'bindings': {
-                'KEY_A': {
-                    'up': 'a-command',
-                    'double_tap': 'a-double-tap-command',
-                },
-                'KEY_B': {
-                    'up': 'b-command',
-                    'double_tap': 'b-double-tap-command',
+    def test_debounce_deadline_moves_to_latest_event(self):
+        handler = KeyboardHandler(
+            {
+                'bindings': {
+                    'KEY_A': {
+                        'up': 'a-command',
+                        'double_tap': 'a-double-tap-command',
+                    },
                 },
             },
-        })
-        self.handlers.append(handler)
+            clock=self.clock,
+        )
+
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        self._advance(handler, 0.15)
+        handler.handle(self._event(ecodes.KEY_A, 0))
+        self._advance(handler, 0.1)
+
+        self.run_command.assert_not_called()
+
+        self._advance(handler, 0.11)
+        self.run_command.assert_called_once_with('a-command')
+
+    def test_tap_history_is_independent_for_each_key(self):
+        handler = KeyboardHandler(
+            {
+                'bindings': {
+                    'KEY_A': {
+                        'up': 'a-command',
+                        'double_tap': 'a-double-tap-command',
+                    },
+                    'KEY_B': {
+                        'up': 'b-command',
+                        'double_tap': 'b-double-tap-command',
+                    },
+                },
+            },
+            clock=self.clock,
+        )
 
         for _ in range(2):
             handler.handle(self._event(ecodes.KEY_A, 1))
             handler.handle(self._event(ecodes.KEY_A, 0))
             handler.handle(self._event(ecodes.KEY_B, 1))
             handler.handle(self._event(ecodes.KEY_B, 0))
-        time.sleep(0.3)
+        self._advance(handler, 0.3)
 
         self.assertCountEqual(
             [call('a-double-tap-command'), call('b-double-tap-command')],

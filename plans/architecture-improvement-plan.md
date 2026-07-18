@@ -27,9 +27,18 @@ This document records the selected architecture direction. Each increment remain
 - Removed the unused shared debounce decorator.
 - Verification: ten tests pass and all Python files compile.
 
+### Phase 1, Increment 2: Completed
+
+- Replaced event debounce threads with per-key monotonic deadlines.
+- Replaced one-shot layer timer threads with monotonic deadlines.
+- Added `Handler.tick()` and process due transitions from the device listener thread.
+- Replaced timing sleeps in tests with an injected fake monotonic clock.
+- Added coverage for deadline expiration and rescheduling from the latest event.
+- Verification: twelve tests pass, all Python files compile, and no handler timer threads remain.
+
 ### Next Increment
 
-Move delayed key-state transitions onto one deterministic execution thread using monotonic deadlines, eliminating the remaining event timer concurrency.
+Add typed profile validation with source-aware diagnostics and remove the unused `dry_run` and `notifications` options.
 
 ## Current Architecture
 
@@ -42,7 +51,9 @@ Profile watcher -> stop every worker -> reload all profiles
 
 The project has a reasonable small-system flow, but device management, delayed key handling, process supervision, reloads, and command execution mutate live state across processes and threads without clear ownership.
 
-## Findings
+## Original Findings
+
+This table records the baseline findings. The implementation progress above is authoritative for findings that have since been resolved.
 
 | Priority | Issue                                          | Impact                                                                                                                                                                                                             |
 |----------|------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -61,7 +72,7 @@ The project has a reasonable small-system flow, but device management, delayed k
 | Low      | Packaging and operations are incomplete        | There is no declared CLI entry point or build backend. The systemd instructions name targets that do not exist (`Makefile:38-43`), and `watch.sh` is stale.                                                        |
 | Low      | Observability is insufficient                  | Multi-process `print` output lacks levels and consistent context. Command output, exit status, restart count, and reload failures are unavailable.                                                                 |
 
-## Confirmed Behavior
+## Original Baseline
 
 - `detect --generate-profile` reaches an `AttributeError` during profile serialization.
 - Pressing two different multi-tap-capable keys inside the debounce window executes only the second key's action.
@@ -110,7 +121,7 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 
 1. [x] Fix profile serialization and add a generated-profile regression test.
 2. [x] Replace the global debounce timer with per-key state.
-3. Run key-state transitions on one thread using monotonic deadlines or `tick(now)`.
+3. [x] Run key-state transitions on one thread using monotonic deadlines or `tick(now)`.
 4. Add dataclass-based profile validation with precise diagnostics.
 5. Remove the unused `dry_run` and `notifications` options.
 6. Generate stable structured selectors while preserving attachment to all matching devices.

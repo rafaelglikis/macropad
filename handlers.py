@@ -1,10 +1,13 @@
-import threading
+import time
 from typing import Protocol
 
 import evdev
 from evdev import InputEvent, KeyEvent
 
 import utils
+
+
+EVENT_DEBOUNCE_SECONDS = 0.2
 
 
 class Handler(Protocol):
@@ -17,6 +20,9 @@ class Handler(Protocol):
         :param e:  Event to handle
         """
 
+    def tick(self) -> None:
+        """Process delayed state transitions that are ready to run."""
+
     @property
     def raw_data(self) -> dict:
         """Return the serializable handler configuration."""
@@ -27,7 +33,8 @@ class KeyboardHandler:
     Handles keyboard events
     """
 
-    def __init__(self, config):
+    def __init__(self, config, clock=time.monotonic):
+        self._clock = clock
         self.bindings = config['bindings']
         self.layers = config.get('layers', {})
         for binding in self.bindings:
@@ -48,13 +55,12 @@ class KeyboardHandler:
         self.layer_used = False
         self.layer_once = False
         self._layer_once_key = None
-        self._layer_timer = None
+        self._layer_deadline = None
         self._layer_generation = 0
         self.dry_run = config.get('dry_run', False)
         self.notifications = config.get('notifications', False)
         self.event_logs = {}
-        self._event_timers = {}
-        self._event_timer_lock = threading.Lock()
+        self._pending_events = {}
 
     @property
     def raw_data(self) -> dict:
@@ -103,21 +109,29 @@ class KeyboardHandler:
         return self.bindings
 
     def handle_event(self, event: KeyEvent, code, current_bindings, layer_generation=None):
-        def handle_debounced_event():
-            with self._event_timer_lock:
-                if self._event_timers.get(code) is not timer:
-                    return
-                del self._event_timers[code]
+        self._pending_events[code] = (
+            self._clock() + EVENT_DEBOUNCE_SECONDS,
+            event,
+            current_bindings,
+            layer_generation,
+        )
+
+    def tick(self):
+        now = self._clock()
+        due_codes = sorted(
+            (
+                code
+                for code, (deadline, _, _, _) in self._pending_events.items()
+                if deadline <= now
+            ),
+            key=lambda code: self._pending_events[code][0],
+        )
+        for code in due_codes:
+            _, event, current_bindings, layer_generation = self._pending_events.pop(code)
             self.handle_event_now(event, code, current_bindings, layer_generation)
 
-        timer = threading.Timer(0.2, handle_debounced_event)
-        timer.daemon = True
-        with self._event_timer_lock:
-            previous_timer = self._event_timers.get(code)
-            if previous_timer:
-                previous_timer.cancel()
-            self._event_timers[code] = timer
-        timer.start()
+        if self._layer_deadline is not None and self._layer_deadline <= now:
+            self.deactivate_layer()
 
     def handle_event_now(self, event: KeyEvent, code, current_bindings, layer_generation=None):
         if layer_generation is not None and layer_generation != self._layer_generation:
@@ -156,7 +170,7 @@ class KeyboardHandler:
         if self._layer_once_key is None:
             self._layer_once_key = code
             self.layer_used = True
-            self._cancel_layer_timer()
+            self._cancel_layer_deadline()
             return True
 
         if code == self._layer_once_key:
@@ -177,7 +191,7 @@ class KeyboardHandler:
 
     def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=5):
         if layer_name in self.layers:
-            self._cancel_layer_timer()
+            self._cancel_layer_deadline()
             self._layer_generation += 1
             self.active_layer = layer_name
             self.layer_activation_key = activation_key_code
@@ -185,20 +199,14 @@ class KeyboardHandler:
             self.layer_once = once
             self._layer_once_key = None
             if once and deactivate_after > 0:
-                generation = self._layer_generation
-                self._layer_timer = threading.Timer(
-                    deactivate_after,
-                    self._deactivate_layer_if_current,
-                    args=(generation,),
-                )
-                self._layer_timer.start()
+                self._layer_deadline = self._clock() + deactivate_after
             print(f"Layer '{layer_name}' activated {'(once)' if once else '(persistent)'}")
             utils.send_notification("Layer Activated", f"Layer '{layer_name}' is now active")
         else:
             print(f"Layer '{layer_name}' not found")
 
     def deactivate_layer(self):
-        self._cancel_layer_timer()
+        self._cancel_layer_deadline()
         layer = self.active_layer
         self._layer_generation += 1
         self.active_layer = None
@@ -212,22 +220,8 @@ class KeyboardHandler:
         else:
             utils.send_notification("Layer Deactivated", "No layer was active")
 
-    def _cancel_layer_timer(self):
-        if self._layer_timer:
-            self._layer_timer.cancel()
-            self._layer_timer = None
-
-    def _cancel_event_timers(self):
-        with self._event_timer_lock:
-            timers = list(self._event_timers.values())
-            self._event_timers.clear()
-        for timer in timers:
-            timer.cancel()
-        self.event_logs.clear()
-
-    def _deactivate_layer_if_current(self, generation):
-        if generation == self._layer_generation:
-            self.deactivate_layer()
+    def _cancel_layer_deadline(self):
+        self._layer_deadline = None
 
     def _map_event(self, e: KeyEvent, event_logs) -> str:
         if self._is_hold_event(e, event_logs):

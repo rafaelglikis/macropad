@@ -116,6 +116,7 @@ def listen(profile):
                     device.close()
                     del devices[path]
 
+            profile.handler.tick()
             time.sleep(0.01)
     finally:
         for device in devices.values():
