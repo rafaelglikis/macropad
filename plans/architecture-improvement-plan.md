@@ -1,0 +1,169 @@
+# Architecture Improvement Plan
+
+## Status
+
+- Status: In progress
+- Decision: Selected for incremental implementation
+- Created: 2026-07-18
+- Scope: End-to-end architecture, reliability, safety, operations, and testing
+
+This document records the selected architecture direction. Each increment remains independently reviewable before the next one begins.
+
+## Selected Constraints
+
+- Deliver Phase 1 in small, independently verified increments.
+- Preserve the behavior where a profile attaches to all matching devices.
+- Remove the unused `dry_run` and `notifications` options instead of implementing them.
+- Validate automated changes on a physical macropad after tests pass.
+
+## Implementation Progress
+
+### Phase 1, Increment 1: Completed
+
+- Added regression coverage for generated profile serialization.
+- Added regression coverage for independent keys within one debounce window.
+- Added an explicit serializable configuration contract to handlers.
+- Replaced the shared event timer and history with per-key state.
+- Removed the unused shared debounce decorator.
+- Verification: ten tests pass and all Python files compile.
+
+### Next Increment
+
+Move delayed key-state transitions onto one deterministic execution thread using monotonic deadlines, eliminating the remaining event timer concurrency.
+
+## Current Architecture
+
+```text
+CLI -> YAML profiles -> process per device -> evdev grab
+    -> keyboard handler -> detached shell commands
+
+Profile watcher -> stop every worker -> reload all profiles
+```
+
+The project has a reasonable small-system flow, but device management, delayed key handling, process supervision, reloads, and command execution mutate live state across processes and threads without clear ownership.
+
+## Findings
+
+| Priority | Issue                                          | Impact                                                                                                                                                                                                             |
+|----------|------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Critical | Profile generation is broken                   | `detect --generate-profile` raises `AttributeError` because `Profile.raw_data` expects `KeyboardHandler.raw_data`, which does not exist (`profile.py:13-23`, `main.py:239-251`).                                   |
+| High     | Debouncing loses unrelated key actions         | `@debounce` has one timer shared by every invocation (`handlers.py:90-92`, `utils.py:22-43`). Pressing two multi-tap-capable keys within 200 ms cancels the first key.                                             |
+| High     | Device identity can grab the wrong keyboard    | Generated profiles store only `device.name` (`profile.py:85-98`). Every device with that name is matched and grabbed (`interceptor.py:22-37`, `interceptor.py:90-105`).                                            |
+| High     | Reloading is destructive and non-transactional | Reload stops every working process before validating replacements (`main.py:152-158`). One invalid fragment can disable an otherwise working device profile.                                                       |
+| High     | Reload state has multiple concurrent owners    | Watchdog invokes reload from its thread (`main.py:19-35`), while the main supervision loop can invoke it concurrently (`main.py:205-213`). Both mutate the same process list.                                      |
+| High     | Invalid actions can kill a device worker       | Profiles are raw dictionaries with little validation (`profile.py:36-42`). Malformed directives can raise `IndexError` (`handlers.py:233-243`), while invalid action types can fail in `Popen` (`utils.py:48-62`). |
+| Medium   | Hotplug handling is incomplete                 | Device scanning only happens when no matching device remains (`interceptor.py:87-106`). A disconnected path is not reacquired while another matching path remains active.                                          |
+| Medium   | Event handling is racy                         | Debounce and layer expiration use `threading.Timer` while the listener mutates the same layer and event-history fields (`handlers.py:44-53`, `handlers.py:149-193`).                                               |
+| Medium   | Shell execution is unbounded and opaque        | Every action starts a detached `shell=True` process with output discarded (`utils.py:48-60`). Rapid repeats can create many processes, and failures are not observable.                                            |
+| Medium   | Configuration options are misleading           | `dry_run` and `notifications` are loaded but not honored (`handlers.py:51-52`). Profile versions are inconsistently typed and never validated.                                                                     |
+| Medium   | Process supervision is fragile                 | A custom `SIGCHLD` reaper overlaps with `multiprocessing.Process` lifecycle handling (`main.py:149`, `utils.py:12-19`). Shutdown uses abrupt termination.                                                          |
+| Medium   | Failures may exit successfully                 | Missing profiles print an error and return status zero (`main.py:178-180`). Non-ENODEV `OSError` instances are swallowed (`main.py:224-226`).                                                                      |
+| Low      | Packaging and operations are incomplete        | There is no declared CLI entry point or build backend. The systemd instructions name targets that do not exist (`Makefile:38-43`), and `watch.sh` is stale.                                                        |
+| Low      | Observability is insufficient                  | Multi-process `print` output lacks levels and consistent context. Command output, exit status, restart count, and reload failures are unavailable.                                                                 |
+
+## Confirmed Behavior
+
+- `detect --generate-profile` reaches an `AttributeError` during profile serialization.
+- Pressing two different multi-tap-capable keys inside the debounce window executes only the second key's action.
+- All seven existing tests pass in approximately 1.11 seconds.
+- Python compilation succeeds.
+- `uv.lock` is consistent.
+- Existing tests cover only one-shot layer behavior in `tests/test_handlers.py`.
+
+## Proposed Architecture
+
+```text
+CLI
+  -> ConfigLoader: parse, validate, merge immutable configurations
+  -> Supervisor: sole owner of worker lifecycle and reload state
+      -> DeviceWorker
+          -> DeviceSession
+          -> BindingEngine
+          -> ActionExecutor
+
+Watcher -> ReloadRequest queue -> Supervisor
+```
+
+### Config Loader
+
+Parse and validate complete candidate configurations before changing live workers. Return immutable, typed configuration objects and errors containing the source file and binding path.
+
+### Supervisor
+
+Make one component solely responsible for starting, stopping, replacing, and monitoring workers. Watcher and signal callbacks should enqueue requests rather than mutate processes directly.
+
+### Device Session
+
+Own device descriptors, grabs, reconnect behavior, and stable hardware matching. Use structured hardware attributes instead of name alone while intentionally attaching to every device that matches the selector.
+
+### Binding Engine
+
+Use a deterministic state machine with per-key state and monotonic timestamps. It should emit actions without executing side effects. Delayed decisions should run on the event-loop thread rather than `threading.Timer` threads.
+
+### Action Executor
+
+Control subprocess concurrency, dry-run behavior, logging, completion, and shutdown. Existing command strings can remain trusted shell actions for configuration compatibility, while explicit argument-array actions can be supported for safer execution.
+
+## Roadmap
+
+### Phase 1: Correctness and Safety
+
+1. [x] Fix profile serialization and add a generated-profile regression test.
+2. [x] Replace the global debounce timer with per-key state.
+3. Run key-state transitions on one thread using monotonic deadlines or `tick(now)`.
+4. Add dataclass-based profile validation with precise diagnostics.
+5. Remove the unused `dry_run` and `notifications` options.
+6. Generate stable structured selectors while preserving attachment to all matching devices.
+
+### Phase 2: Runtime Reliability
+
+1. Queue watcher events instead of reloading from the watcher thread.
+2. Validate and merge the complete candidate configuration before stopping workers.
+3. Restart only the failed or changed device worker.
+4. Add per-device exponential restart backoff.
+5. Replace abrupt termination with a shutdown event and bounded join.
+6. Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
+7. Use `selectors` for device descriptors and rescan paths even when other devices remain connected.
+
+### Phase 3: Commands and Operations
+
+1. Add a bounded action executor that tracks subprocesses and logs exit status.
+2. Preserve trusted shell-string actions for compatibility and support explicit argument-array actions.
+3. Use Python logging with device, profile, key, and worker context.
+4. Return nonzero exit codes for startup and configuration failures.
+5. Add a real `[project.scripts]` entry point and a checked-in systemd unit template.
+6. Remove or repair `watch.sh` and align the Makefile target names.
+
+### Phase 4: Testing and CI
+
+Add deterministic coverage for:
+
+- Generated profile serialization.
+- Independent simultaneous keys and tap timing.
+- Hold and repeat behavior.
+- Profile validation and fragment conflicts.
+- Transactional reload failure.
+- Partial device disconnect and reconnect.
+- Worker failure and restart backoff.
+- Command failure, dry-run behavior, and concurrency limits.
+
+Add CI for supported Python versions with unit tests, compilation, linting, and lockfile validation.
+
+## Decision Criteria
+
+Before selecting this plan, compare it with alternatives using these criteria:
+
+- Risk reduction for accidental device grabs and lost actions.
+- Compatibility with existing profile files.
+- Implementation size and migration complexity.
+- Ability to test behavior without physical hardware.
+- Operational reliability under systemd.
+- Ongoing maintenance cost.
+
+## Suggested First Increment
+
+If this plan is selected, start with the smallest independently valuable increment:
+
+1. Add failing regression tests for profile generation and independent-key debounce.
+2. Fix only those two defects.
+3. Validate behavior on a physical macropad before starting the supervisor redesign.
