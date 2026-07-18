@@ -53,7 +53,7 @@ This document records the selected architecture direction. Each increment remain
 
 ### Next Increment
 
-Replace abrupt worker termination with a shutdown event and bounded join.
+Use `selectors` for device descriptors and rescan paths while other matching devices remain connected.
 
 ### Phase 2, Increment 1: Completed
 
@@ -94,6 +94,18 @@ Replace abrupt worker termination with a shutdown event and bounded join.
 - Track detached command subprocesses explicitly and reap completed commands from the worker loop.
 - Add real-process coverage for worker exit detection and replacement.
 - Verification: fifty-two tests pass, all Python files compile, and live fault injection restarted one killed worker after one second while another worker continued processing input.
+
+### Phase 2, Increment 5: Completed
+
+- Give every device worker a process-safe shutdown event.
+- Exit listener loops cooperatively and close grabbed input devices through their cleanup path.
+- Signal all workers before a shared five-second join window and force-kill only unresponsive processes.
+- Convert CLI `SIGTERM` handling into an orderly main-loop exit and supervisor shutdown.
+- Scope CLI signal handling to listen mode and route worker `SIGTERM` signals to their process-safe shutdown event.
+- Keep an unkillable predecessor tracked and block its replacement from starting.
+- Run the Python CLI directly as the systemd main process with mixed kill mode and a ten-second stop timeout.
+- Add coverage for graceful reload replacement, device cleanup, real-process shutdown, CLI signal handling, and forced fallback.
+- Verification: fifty-nine tests pass, all Python files compile, a systemd restart completes cleanly without status 143, and a directly signaled worker exits cooperatively before supervisor recovery.
 
 ### Package Structure Migration: Completed
 
@@ -196,7 +208,7 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 2. [x] Validate and merge the complete candidate configuration before stopping workers.
 3. [x] Restart only the failed or changed device worker.
 4. [x] Add per-device exponential restart backoff.
-5. Replace abrupt termination with a shutdown event and bounded join.
+5. [x] Replace abrupt termination with a shutdown event and bounded join.
 6. [x] Remove the custom `SIGCHLD` reaper and let the supervisor collect children.
 7. Use `selectors` for device descriptors and rescan paths even when other devices remain connected.
 

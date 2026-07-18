@@ -1,4 +1,6 @@
 import queue
+import signal
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -62,6 +64,33 @@ class SupervisionCycleTests(unittest.TestCase):
         )
 
         profile_supervisor.tick.assert_called_once_with()
+
+
+class ShutdownSignalTests(unittest.TestCase):
+    def test_sigterm_handler_requests_orderly_shutdown(self):
+        shutdown_requested = threading.Event()
+
+        with patch('macropad.cli.signal.signal') as install_signal:
+            cli.install_shutdown_handler(shutdown_requested)
+
+        handler = install_signal.call_args.args[1]
+        handler(signal.SIGTERM, None)
+
+        install_signal.assert_called_once_with(signal.SIGTERM, handler)
+        self.assertTrue(shutdown_requested.is_set())
+
+    def test_detect_keeps_default_sigterm_behavior(self):
+        args = SimpleNamespace(subcommand='detect')
+
+        with (
+                patch('macropad.cli.parse_args', return_value=args),
+                patch('macropad.cli.detect') as detect,
+                patch('macropad.cli.install_shutdown_handler') as install_shutdown,
+        ):
+            cli.main()
+
+        detect.assert_called_once_with(args)
+        install_shutdown.assert_not_called()
 
 
 if __name__ == '__main__':

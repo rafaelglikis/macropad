@@ -1,6 +1,7 @@
 import multiprocessing
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from . import interceptor, profiles
 
@@ -8,6 +9,8 @@ from . import interceptor, profiles
 RESTART_INITIAL_DELAY_SECONDS = 1.0
 RESTART_MAX_DELAY_SECONDS = 30.0
 RESTART_STABLE_SECONDS = 30.0
+SHUTDOWN_TIMEOUT_SECONDS = 5.0
+KILL_JOIN_TIMEOUT_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class PreparedProfile:
 @dataclass
 class Worker:
     prepared_profile: PreparedProfile
+    shutdown_event: Any
     process: multiprocessing.Process | None = None
     failure_count: int = 0
     retry_at: float | None = None
@@ -52,10 +56,17 @@ def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
 
 
 class ProfileSupervisor:
-    def __init__(self, process_factory=None, device_present=None, clock=None):
+    def __init__(
+            self,
+            process_factory=None,
+            device_present=None,
+            clock=None,
+            shutdown_event_factory=None,
+    ):
         self._process_factory = process_factory or multiprocessing.Process
         self._device_present = device_present or interceptor.has_device
         self._clock = clock or time.monotonic
+        self._shutdown_event_factory = shutdown_event_factory or multiprocessing.Event
         self.workers: dict[str, Worker] = {}
 
     def start(self, profile_paths: list[str]) -> None:
@@ -71,11 +82,13 @@ class ProfileSupervisor:
         }
 
         removed_workers = [
-            self.workers.pop(device_name)
-            for device_name in list(self.workers)
+            worker
+            for device_name, worker in self.workers.items()
             if device_name not in prepared_by_device
         ]
         self._stop_workers(removed_workers)
+        for worker in removed_workers:
+            self.workers.pop(worker.device_name)
 
         start_errors = []
         for device_name, prepared_profile in prepared_by_device.items():
@@ -88,10 +101,10 @@ class ProfileSupervisor:
                 continue
 
             if current_worker:
-                self.workers.pop(device_name)
                 self._stop_workers([current_worker])
+                self.workers.pop(device_name)
 
-            worker = Worker(prepared_profile)
+            worker = Worker(prepared_profile, self._shutdown_event_factory())
             self.workers[device_name] = worker
             try:
                 self._launch_worker(worker)
@@ -141,14 +154,14 @@ class ProfileSupervisor:
 
     def shutdown(self) -> None:
         workers = list(self.workers.values())
-        self.workers.clear()
         self._stop_workers(workers)
+        self.workers.clear()
 
     def _start_prepared_profiles(self, prepared_profiles: list[PreparedProfile]) -> None:
         started_workers = {}
         try:
             for prepared_profile in prepared_profiles:
-                worker = Worker(prepared_profile)
+                worker = Worker(prepared_profile, self._shutdown_event_factory())
                 self._launch_worker(worker)
                 started_workers[worker.device_name] = worker
         except Exception:
@@ -158,14 +171,16 @@ class ProfileSupervisor:
 
     def _launch_worker(self, worker: Worker) -> None:
         prepared_profile = worker.prepared_profile
+        worker.shutdown_event.clear()
         process = self._process_factory(
             target=interceptor.listen,
-            args=(prepared_profile.profile,),
+            args=(prepared_profile.profile, worker.shutdown_event),
         )
         started = False
         try:
             process.start()
             started = True
+            worker.process = process
             if self._device_present(worker.device_name):
                 print(f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}")
             else:
@@ -173,15 +188,14 @@ class ProfileSupervisor:
                     f"Started profile for {worker.device_name}: {', '.join(prepared_profile.paths)}. "
                     "Waiting for device..."
                 )
-            worker.process = process
             worker.retry_at = None
             worker.started_at = self._clock()
         except Exception:
             is_alive = process.is_alive()
-            if is_alive:
-                process.terminate()
             if started or is_alive:
-                process.join(timeout=5)
+                worker.process = process
+                self._stop_workers([worker])
+                worker.process = None
             raise
 
     @staticmethod
@@ -201,13 +215,23 @@ class ProfileSupervisor:
 
     @staticmethod
     def _stop_workers(workers) -> None:
-        processes = [
-            worker.process
-            for worker in workers
-            if worker.process is not None
-        ]
+        workers = list(workers)
+        for worker in workers:
+            worker.shutdown_event.set()
+
+        processes = [worker.process for worker in workers if worker.process is not None]
+        deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
         for process in processes:
-            if process.is_alive():
-                process.terminate()
-        for process in processes:
-            process.join(timeout=5)
+            process.join(timeout=max(0, deadline - time.monotonic()))
+
+        unresponsive_processes = [process for process in processes if process.is_alive()]
+        for process in unresponsive_processes:
+            print(f'Worker process {process.pid} did not stop gracefully; killing it')
+            process.kill()
+        for process in unresponsive_processes:
+            process.join(timeout=KILL_JOIN_TIMEOUT_SECONDS)
+
+        surviving_processes = [process for process in unresponsive_processes if process.is_alive()]
+        if surviving_processes:
+            pids = ', '.join(str(process.pid) for process in surviving_processes)
+            raise RuntimeError(f'Worker process(es) did not stop: {pids}')

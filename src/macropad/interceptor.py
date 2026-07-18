@@ -1,9 +1,17 @@
+import signal
 import time
 
 import evdev
 from evdev import InputDevice
 
 from . import utils
+
+
+def install_shutdown_handler(shutdown_event) -> None:
+    def request_shutdown(signum, frame):
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
 
 
 def _matching_device_paths(device_name: str) -> list[str]:
@@ -66,12 +74,13 @@ def detect() -> InputDevice:
         time.sleep(0.3)
 
 
-def listen(profile):
+def listen(profile, shutdown_event):
+    install_shutdown_handler(shutdown_event)
     devices = {}
     last_scan = 0
 
     try:
-        while True:
+        while not shutdown_event.is_set():
             current_time = time.time()
             if not devices and current_time - last_scan >= 0.3:
                 for path in _matching_device_paths(profile.device):
@@ -94,7 +103,7 @@ def listen(profile):
 
             for path, device in list(devices.items()):
                 try:
-                    while e := device.read_one():
+                    while not shutdown_event.is_set() and (e := device.read_one()):
                         profile.handler.handle(e)
                 except OSError as e:
                     if e.errno != 19:

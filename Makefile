@@ -3,7 +3,6 @@
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
 PROJECT_DIR := $(CURDIR)
-UV_PATH := $(shell command -v uv)
 
 install:
 	@echo "Installing dependencies with uv..."
@@ -32,7 +31,9 @@ systemd:
 	@echo "Type=simple" >> $(SERVICE_FILE)
 	@echo "WorkingDirectory=$(PROJECT_DIR)" >> $(SERVICE_FILE)
 	@echo "Environment=PYTHONUNBUFFERED=1" >> $(SERVICE_FILE)
-	@echo "ExecStart=/bin/bash -lc '$(UV_PATH) run --project $(PROJECT_DIR) macropad listen --watch'" >> $(SERVICE_FILE)
+	@echo "ExecStart=$(PROJECT_DIR)/.venv/bin/macropad listen --watch" >> $(SERVICE_FILE)
+	@echo "KillMode=mixed" >> $(SERVICE_FILE)
+	@echo "TimeoutStopSec=10" >> $(SERVICE_FILE)
 	@echo "Restart=on-failure" >> $(SERVICE_FILE)
 	@echo "RestartSec=5" >> $(SERVICE_FILE)
 	@echo "" >> $(SERVICE_FILE)

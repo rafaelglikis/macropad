@@ -14,6 +14,7 @@ class FakeProcess:
         self.args = args
         self.alive = False
         self.terminated = False
+        self.killed = False
         self.join_timeouts = []
         self.pid = FakeProcess.next_pid
         FakeProcess.next_pid += 1
@@ -30,6 +31,21 @@ class FakeProcess:
 
     def join(self, timeout=None):
         self.join_timeouts.append(timeout)
+        if self.args[1].is_set() and not getattr(self, 'ignore_shutdown', False):
+            self.alive = False
+
+    def kill(self):
+        self.alive = False
+        self.killed = True
+
+
+class UnresponsiveProcess(FakeProcess):
+    ignore_shutdown = True
+
+
+class UnkillableProcess(UnresponsiveProcess):
+    def kill(self):
+        self.killed = True
 
 
 class FailingProcess(FakeProcess):
@@ -50,6 +66,20 @@ class FakeClock:
         self.now += seconds
 
 
+class FakeEvent:
+    def __init__(self):
+        self.value = False
+
+    def clear(self):
+        self.value = False
+
+    def is_set(self):
+        return self.value
+
+    def set(self):
+        self.value = True
+
+
 def exit_immediately():
     pass
 
@@ -61,13 +91,12 @@ def wait_until_stopped(stop_event):
 class RealProcessFactory:
     def __init__(self):
         self.processes = []
-        self.stop_event = multiprocessing.Event()
 
     def __call__(self, target, args):
         if self.processes:
             process = multiprocessing.Process(
                 target=wait_until_stopped,
-                args=(self.stop_event,),
+                args=(args[1],),
             )
         else:
             process = multiprocessing.Process(target=exit_immediately)
@@ -82,11 +111,12 @@ class ProfileSupervisorTests(unittest.TestCase):
         path = path or f'/profiles/{device_name}.yml'
         return supervisor.PreparedProfile((path,), profile)
 
-    def _create_supervisor(self, clock=None):
+    def _create_supervisor(self, clock=None, process_factory=FakeProcess):
         return supervisor.ProfileSupervisor(
-            process_factory=FakeProcess,
+            process_factory=process_factory,
             device_present=lambda device_name: False,
             clock=clock,
+            shutdown_event_factory=FakeEvent,
         )
 
     def test_workers_are_owned_by_device_name(self):
@@ -161,14 +191,17 @@ class ProfileSupervisorTests(unittest.TestCase):
         ):
             profile_supervisor.start(['/profiles/macros.yml', '/profiles/second.yml'])
         retained_process = profile_supervisor.workers['Macro Keyboard'].process
+        removed_event = profile_supervisor.workers['Second Keyboard'].shutdown_event
         removed_process = profile_supervisor.workers['Second Keyboard'].process
 
         with patch('macropad.supervisor.prepare_profiles', return_value=[retained_profile]):
             profile_supervisor.reload(['/profiles/macros.yml'])
 
         self.assertIs(retained_process, profile_supervisor.workers['Macro Keyboard'].process)
-        self.assertTrue(removed_process.terminated)
-        self.assertEqual([5], removed_process.join_timeouts)
+        self.assertTrue(removed_event.is_set())
+        self.assertFalse(removed_process.terminated)
+        self.assertFalse(removed_process.killed)
+        self.assertEqual(1, len(removed_process.join_timeouts))
         self.assertNotIn('Second Keyboard', profile_supervisor.workers)
 
     def test_reload_restarts_only_changed_worker(self):
@@ -183,6 +216,7 @@ class ProfileSupervisorTests(unittest.TestCase):
         ):
             profile_supervisor.start(['/profiles/macros.yml', '/profiles/second.yml'])
         current_process = profile_supervisor.workers['Macro Keyboard'].process
+        current_event = profile_supervisor.workers['Macro Keyboard'].shutdown_event
         unchanged_process = profile_supervisor.workers['Second Keyboard'].process
 
         with patch(
@@ -191,10 +225,30 @@ class ProfileSupervisorTests(unittest.TestCase):
         ):
             profile_supervisor.reload(['/profiles/macros.yml', '/profiles/second.yml'])
 
-        self.assertTrue(current_process.terminated)
+        self.assertTrue(current_event.is_set())
+        self.assertFalse(current_process.terminated)
+        self.assertFalse(current_process.killed)
         self.assertIsNot(current_process, profile_supervisor.workers['Macro Keyboard'].process)
         self.assertIs(unchanged_process, profile_supervisor.workers['Second Keyboard'].process)
         self.assertFalse(unchanged_process.terminated)
+
+    def test_reload_does_not_replace_worker_that_survives_forced_shutdown(self):
+        profile_supervisor = self._create_supervisor(process_factory=UnkillableProcess)
+        current_profile = self._prepared_profile(config='old')
+        changed_profile = self._prepared_profile(config='new')
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[current_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        current_worker = profile_supervisor.workers['Macro Keyboard']
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[changed_profile]):
+            with self.assertRaisesRegex(RuntimeError, 'Worker process.*did not stop'):
+                profile_supervisor.reload(['/profiles/macros.yml'])
+
+        self.assertIs(current_worker, profile_supervisor.workers['Macro Keyboard'])
+        self.assertTrue(current_worker.process.is_alive())
+        self.assertTrue(current_worker.process.killed)
+        self.assertEqual('old', current_worker.prepared_profile.profile.config)
 
     def test_reload_preserves_backoff_for_unchanged_failed_worker(self):
         clock = FakeClock()
@@ -225,6 +279,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             process_factory=FailingProcess,
             device_present=lambda device_name: False,
             clock=clock,
+            shutdown_event_factory=FakeEvent,
         )
         current_profile = self._prepared_profile()
         broken_profile = self._prepared_profile('Broken Keyboard')
@@ -319,8 +374,29 @@ class ProfileSupervisorTests(unittest.TestCase):
             self.assertEqual(2, len(process_factory.processes))
             self.assertTrue(worker.process.is_alive())
         finally:
-            process_factory.stop_event.set()
             profile_supervisor.shutdown()
+
+    def test_real_worker_stops_cleanly_from_shutdown_event(self):
+        def process_factory(target, args):
+            return multiprocessing.Process(
+                target=wait_until_stopped,
+                args=(args[1],),
+            )
+
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=process_factory,
+            device_present=lambda device_name: False,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        process = profile_supervisor.workers['Macro Keyboard'].process
+
+        profile_supervisor.shutdown()
+
+        self.assertFalse(process.is_alive())
+        self.assertEqual(0, process.exitcode)
 
     def test_stable_worker_resets_restart_backoff(self):
         clock = FakeClock()
@@ -410,18 +486,37 @@ class ProfileSupervisorTests(unittest.TestCase):
 
         self.assertEqual({}, profile_supervisor.workers)
 
-    def test_shutdown_terminates_and_joins_workers(self):
+    def test_shutdown_signals_and_joins_workers(self):
         profile_supervisor = self._create_supervisor()
         prepared_profile = self._prepared_profile()
 
         with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
             profile_supervisor.start(['/profiles/macros.yml'])
+        shutdown_event = profile_supervisor.workers['Macro Keyboard'].shutdown_event
         process = profile_supervisor.workers['Macro Keyboard'].process
 
         profile_supervisor.shutdown()
 
-        self.assertTrue(process.terminated)
-        self.assertEqual([5], process.join_timeouts)
+        self.assertTrue(shutdown_event.is_set())
+        self.assertFalse(process.terminated)
+        self.assertFalse(process.killed)
+        self.assertEqual(1, len(process.join_timeouts))
+        self.assertEqual({}, profile_supervisor.workers)
+
+    def test_shutdown_kills_worker_that_ignores_shutdown_event(self):
+        profile_supervisor = self._create_supervisor(process_factory=UnresponsiveProcess)
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        shutdown_event = profile_supervisor.workers['Macro Keyboard'].shutdown_event
+        process = profile_supervisor.workers['Macro Keyboard'].process
+
+        profile_supervisor.shutdown()
+
+        self.assertTrue(shutdown_event.is_set())
+        self.assertTrue(process.killed)
+        self.assertEqual(2, len(process.join_timeouts))
         self.assertEqual({}, profile_supervisor.workers)
 
 

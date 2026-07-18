@@ -2,6 +2,8 @@
 import argparse
 import pathlib
 import queue
+import signal
+import threading
 import time
 from typing import List
 
@@ -148,14 +150,23 @@ def run_supervision_cycle(
     profile_supervisor.tick()
 
 
+def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
+    def request_shutdown(signum, frame):
+        shutdown_requested.set()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+
+
 def main():
     observer = None
     reload_requests = queue.SimpleQueue()
     profile_supervisor = ProfileSupervisor()
+    shutdown_requested = threading.Event()
 
     try:
         args = parse_args()
         if args.subcommand == 'listen':
+            install_shutdown_handler(shutdown_requested)
             notify2.init('Macropad')
 
             using_default_config = False
@@ -198,8 +209,7 @@ def main():
                         observer = None
 
             try:
-                while True:
-                    time.sleep(1)
+                while not shutdown_requested.wait(1):
                     run_supervision_cycle(profile_supervisor, args, reload_requests)
             except KeyboardInterrupt:
                 pass
