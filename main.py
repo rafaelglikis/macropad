@@ -83,7 +83,7 @@ def start_profile_processes(profile_paths: List[str]) -> List[multiprocessing.Pr
     for profile_path in profile_paths:
         try:
             profile_data = profile.load_yml(profile_path)
-            profiles_by_device.setdefault(profile_data['device'], []).append((profile_path, profile_data))
+            profiles_by_device.setdefault(profile_data.device, []).append((profile_path, profile_data))
         except Exception as e:
             print(f"Error loading profile {profile_path}: {e}")
 

@@ -1,12 +1,35 @@
+import pickle
+import tempfile
 import unittest
 from types import SimpleNamespace
 
 import yaml
 
 import profile
+from configuration import FrozenDict
 
 
 class ProfileTests(unittest.TestCase):
+    @staticmethod
+    def _profile_data(**overrides):
+        profile_data = {
+            'device': 'Demo Device',
+            'version': 1,
+            'bindings': {
+                'KEY_A': {
+                    'up': 'a-command',
+                    'double_tap': ['a-double-command'],
+                    'layers': {
+                        'mod': {
+                            'up': '^default_layer',
+                        },
+                    },
+                },
+            },
+        }
+        profile_data.update(overrides)
+        return profile_data
+
     def test_generated_profile_can_be_serialized(self):
         generated_profile = profile.create_sample(SimpleNamespace(name='Demo Device'))
 
@@ -21,6 +44,204 @@ class ProfileTests(unittest.TestCase):
                 }
             },
             profile_data['bindings'],
+        )
+
+    def test_validation_returns_typed_config_and_normalizes_version(self):
+        profile_config = profile.validate_profile_data(
+            self._profile_data(),
+            source='demo.yml',
+        )
+
+        self.assertIsInstance(profile_config, profile.ProfileConfig)
+        self.assertIsInstance(profile_config.keyboard, profile.KeyboardConfig)
+        self.assertIsInstance(profile_config.keyboard.bindings['KEY_A'], profile.BindingConfig)
+        self.assertEqual('1', profile_config.version)
+        self.assertEqual('demo.yml', profile_config.source)
+        self.assertEqual(
+            ('a-command',),
+            profile_config.keyboard.bindings['KEY_A'].actions['up'],
+        )
+
+    def test_inline_layers_are_normalized_into_keyboard_config(self):
+        profile_config = profile.validate_profile_data(self._profile_data())
+
+        self.assertNotIn('layers', profile_config.keyboard.bindings['KEY_A'].actions)
+        self.assertEqual(
+            ('^default_layer',),
+            profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions['up'],
+        )
+        self.assertIs(profile_config.keyboard, profile.create_from_data(profile_config).handler.config)
+
+    def test_inline_and_top_level_layers_are_combined(self):
+        profile_config = profile.validate_profile_data(self._profile_data(layers={
+            'mod': {
+                'bindings': {
+                    'KEY_A': {
+                        'down': 'layer-down-command',
+                    },
+                },
+            },
+        }))
+
+        self.assertEqual(
+            {
+                'down': ('layer-down-command',),
+                'up': ('^default_layer',),
+            },
+            profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions,
+        )
+
+    def test_validation_rejects_removed_profile_options(self):
+        for field_name in ('notifications', 'dry_run'):
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(profile.ProfileValidationError) as context:
+                    profile.validate_profile_data(
+                        self._profile_data(**{field_name: True}),
+                        source='legacy.yml',
+                    )
+
+                self.assertEqual(
+                    f'legacy.yml: {field_name}: unsupported profile field',
+                    str(context.exception),
+                )
+
+    def test_validation_reports_source_and_binding_path(self):
+        profile_data = self._profile_data(bindings={
+            'KEY_A': {
+                'tap': 'a-command',
+            },
+        })
+
+        with self.assertRaises(profile.ProfileValidationError) as context:
+            profile.validate_profile_data(profile_data, source='broken.yml')
+
+        self.assertIn('broken.yml: bindings.KEY_A.tap: unsupported event', str(context.exception))
+
+    def test_validation_rejects_unknown_key_name(self):
+        profile_data = self._profile_data(bindings={
+            'KEY_NOT_REAL': 'a-command',
+        })
+
+        with self.assertRaises(profile.ProfileValidationError) as context:
+            profile.validate_profile_data(profile_data, source='broken.yml')
+
+        self.assertEqual(
+            'broken.yml: bindings.KEY_NOT_REAL: unknown evdev key name',
+            str(context.exception),
+        )
+
+    def test_validation_rejects_non_string_actions(self):
+        profile_data = self._profile_data(bindings={
+            'KEY_A': {
+                'up': ['a-command', 42],
+            },
+        })
+
+        with self.assertRaises(profile.ProfileValidationError) as context:
+            profile.validate_profile_data(profile_data, source='broken.yml')
+
+        self.assertEqual(
+            'broken.yml: bindings.KEY_A.up[1]: commands must be non-empty strings',
+            str(context.exception),
+        )
+
+    def test_validation_rejects_invalid_handler_command(self):
+        profile_data = self._profile_data(bindings={
+            'KEY_A': {
+                'up': '^layer',
+            },
+        })
+
+        with self.assertRaises(profile.ProfileValidationError) as context:
+            profile.validate_profile_data(profile_data, source='broken.yml')
+
+        self.assertIn('broken.yml: bindings.KEY_A.up: invalid handler command', str(context.exception))
+
+    def test_load_yml_reports_filename_for_invalid_yaml(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml') as file:
+            file.write('device: [')
+            file.flush()
+
+            with self.assertRaises(profile.ProfileValidationError) as context:
+                profile.load_yml(file.name)
+
+        self.assertIn(f'{file.name}: invalid YAML:', str(context.exception))
+
+    def test_load_yml_rejects_duplicate_keys_with_filename_and_line(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml') as file:
+            file.write(
+                'device: Demo Device\n'
+                'bindings:\n'
+                '  KEY_A:\n'
+                '    up: first-command\n'
+                '    up: second-command\n'
+            )
+            file.flush()
+            filename = file.name
+
+            with self.assertRaises(profile.ProfileValidationError) as context:
+                profile.load_yml(filename)
+
+        message = str(context.exception)
+        self.assertIn(f'{filename}: invalid YAML:', message)
+        self.assertIn("found duplicate key 'up'", message)
+        self.assertIn('line 5', message)
+
+    def test_profile_config_is_deeply_immutable(self):
+        profile_config = profile.validate_profile_data(self._profile_data())
+
+        self.assertIsInstance(profile_config.keyboard.bindings, FrozenDict)
+        self.assertIsInstance(profile_config.keyboard.layers, FrozenDict)
+        self.assertIsInstance(profile_config.keyboard.bindings['KEY_A'].actions, FrozenDict)
+
+        with self.assertRaises(TypeError):
+            profile_config.keyboard.bindings['KEY_B'] = profile_config.keyboard.bindings['KEY_A']
+        with self.assertRaises(TypeError):
+            profile_config.keyboard.bindings['KEY_A'].actions['up'] = ('changed-command',)
+
+    def test_profile_config_remains_picklable(self):
+        profile_config = profile.validate_profile_data(self._profile_data())
+
+        restored_config = pickle.loads(pickle.dumps(profile_config))
+
+        self.assertEqual(profile_config, restored_config)
+
+    def test_merge_combines_typed_profile_fragments(self):
+        first = profile.validate_profile_data(
+            self._profile_data(bindings={'KEY_A': 'a-command'}),
+            source='first.yml',
+        )
+        second = profile.validate_profile_data(
+            self._profile_data(bindings={'KEY_B': 'b-command'}),
+            source='second.yml',
+        )
+
+        merged = profile.merge_data([first, second])
+
+        self.assertEqual(
+            {
+                'KEY_A': {'up': ['a-command']},
+                'KEY_B': {'up': ['b-command']},
+            },
+            merged.keyboard.to_data()['bindings'],
+        )
+
+    def test_merge_conflict_reports_later_source_and_path(self):
+        first = profile.validate_profile_data(
+            self._profile_data(bindings={'KEY_A': 'first-command'}),
+            source='first.yml',
+        )
+        second = profile.validate_profile_data(
+            self._profile_data(bindings={'KEY_A': 'second-command'}),
+            source='second.yml',
+        )
+
+        with self.assertRaises(profile.ProfileValidationError) as context:
+            profile.merge_data([first, second])
+
+        self.assertEqual(
+            'second.yml: bindings.KEY_A.up: conflicts with an earlier profile fragment',
+            str(context.exception),
         )
 
 

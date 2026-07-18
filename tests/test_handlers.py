@@ -3,6 +3,7 @@ from unittest.mock import call, patch
 
 from evdev import InputEvent, ecodes
 
+import profile
 from handlers import KeyboardHandler
 
 
@@ -24,19 +25,25 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         self.clock = FakeClock()
 
+    @staticmethod
+    def _keyboard_config(bindings):
+        return profile.validate_profile_data({
+            'device': 'Test Device',
+            'version': 1,
+            'bindings': bindings,
+        }).keyboard
+
     def _create_handler(self, layer_binding):
         return KeyboardHandler(
-            {
-                'bindings': {
-                    'KEY_SPACE': {'up': '^layer mod once'},
-                    'KEY_T': {
-                        'up': 'base-command',
-                        'layers': {
-                            'mod': layer_binding,
-                        },
+            self._keyboard_config({
+                'KEY_SPACE': {'up': '^layer mod once'},
+                'KEY_T': {
+                    'up': 'base-command',
+                    'layers': {
+                        'mod': layer_binding,
                     },
                 },
-            },
+            }),
             clock=self.clock,
         )
 
@@ -150,6 +157,43 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.run_command.assert_called_once_with('layer-double-tap-command')
         self.assertIsNone(handler.active_layer)
 
+    def test_one_shot_layer_supports_double_tap_only_binding(self):
+        handler = self._create_handler({
+            'double_tap': 'layer-double-tap-command',
+        })
+        self._activate_layer(handler)
+
+        handler.handle(self._event(ecodes.KEY_T, 1))
+        handler.handle(self._event(ecodes.KEY_T, 0))
+        handler.handle(self._event(ecodes.KEY_T, 1))
+        handler.handle(self._event(ecodes.KEY_T, 0))
+
+        self.run_command.assert_not_called()
+        self.assertEqual('mod', handler.active_layer)
+
+        self._advance(handler, 0.3)
+
+        self.run_command.assert_called_once_with('layer-double-tap-command')
+        self.assertIsNone(handler.active_layer)
+
+    def test_one_shot_layer_supports_triple_tap_only_binding(self):
+        handler = self._create_handler({
+            'triple_tap': 'layer-triple-tap-command',
+        })
+        self._activate_layer(handler)
+
+        for _ in range(3):
+            handler.handle(self._event(ecodes.KEY_T, 1))
+            handler.handle(self._event(ecodes.KEY_T, 0))
+
+        self.run_command.assert_not_called()
+        self.assertEqual('mod', handler.active_layer)
+
+        self._advance(handler, 0.3)
+
+        self.run_command.assert_called_once_with('layer-triple-tap-command')
+        self.assertIsNone(handler.active_layer)
+
     def test_one_shot_timeout_is_cancelled_while_key_is_in_progress(self):
         handler = self._create_handler({'up': 'layer-command'})
         handler.activate_layer('mod', 'KEY_SPACE', once=True, deactivate_after=0.05)
@@ -166,18 +210,16 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
     def test_debounce_is_independent_for_each_key(self):
         handler = KeyboardHandler(
-            {
-                'bindings': {
-                    'KEY_A': {
-                        'up': 'a-command',
-                        'double_tap': 'a-double-tap-command',
-                    },
-                    'KEY_B': {
-                        'up': 'b-command',
-                        'double_tap': 'b-double-tap-command',
-                    },
+            self._keyboard_config({
+                'KEY_A': {
+                    'up': 'a-command',
+                    'double_tap': 'a-double-tap-command',
                 },
-            },
+                'KEY_B': {
+                    'up': 'b-command',
+                    'double_tap': 'b-double-tap-command',
+                },
+            }),
             clock=self.clock,
         )
 
@@ -196,14 +238,12 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
     def test_debounce_deadline_moves_to_latest_event(self):
         handler = KeyboardHandler(
-            {
-                'bindings': {
-                    'KEY_A': {
-                        'up': 'a-command',
-                        'double_tap': 'a-double-tap-command',
-                    },
+            self._keyboard_config({
+                'KEY_A': {
+                    'up': 'a-command',
+                    'double_tap': 'a-double-tap-command',
                 },
-            },
+            }),
             clock=self.clock,
         )
 
@@ -219,18 +259,16 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
     def test_tap_history_is_independent_for_each_key(self):
         handler = KeyboardHandler(
-            {
-                'bindings': {
-                    'KEY_A': {
-                        'up': 'a-command',
-                        'double_tap': 'a-double-tap-command',
-                    },
-                    'KEY_B': {
-                        'up': 'b-command',
-                        'double_tap': 'b-double-tap-command',
-                    },
+            self._keyboard_config({
+                'KEY_A': {
+                    'up': 'a-command',
+                    'double_tap': 'a-double-tap-command',
                 },
-            },
+                'KEY_B': {
+                    'up': 'b-command',
+                    'double_tap': 'b-double-tap-command',
+                },
+            }),
             clock=self.clock,
         )
 

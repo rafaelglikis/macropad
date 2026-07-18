@@ -5,9 +5,11 @@ import evdev
 from evdev import InputEvent, KeyEvent
 
 import utils
+from configuration import BindingConfig, KeyboardConfig
 
 
 EVENT_DEBOUNCE_SECONDS = 0.2
+DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
 
 
 class Handler(Protocol):
@@ -23,32 +25,15 @@ class Handler(Protocol):
     def tick(self) -> None:
         """Process delayed state transitions that are ready to run."""
 
-    @property
-    def raw_data(self) -> dict:
-        """Return the serializable handler configuration."""
-
 
 class KeyboardHandler:
     """
     Handles keyboard events
     """
 
-    def __init__(self, config, clock=time.monotonic):
+    def __init__(self, config: KeyboardConfig, clock=time.monotonic):
         self._clock = clock
-        self.bindings = config['bindings']
-        self.layers = config.get('layers', {})
-        for binding in self.bindings:
-            if 'layers' in self.bindings[binding]:
-                for layer in self.bindings[binding]['layers']:
-                    for b in self.bindings[binding]['layers'][layer]:
-                        if layer not in self.layers:
-                            self.layers[layer] = {}
-                        if 'bindings' not in self.layers[layer]:
-                            self.layers[layer]['bindings'] = {}
-                        if binding not in self.layers[layer]['bindings']:
-                            self.layers[layer]['bindings'][binding] = {}
-                        self.layers[layer]['bindings'][binding][b] = self.bindings[binding]['layers'][layer][b]
-                del self.bindings[binding]['layers']
+        self.config = config
 
         self.active_layer = None
         self.layer_activation_key = None
@@ -57,21 +42,8 @@ class KeyboardHandler:
         self._layer_once_key = None
         self._layer_deadline = None
         self._layer_generation = 0
-        self.dry_run = config.get('dry_run', False)
-        self.notifications = config.get('notifications', False)
         self.event_logs = {}
         self._pending_events = {}
-
-    @property
-    def raw_data(self) -> dict:
-        data = {'bindings': self.bindings}
-        if self.layers:
-            data['layers'] = self.layers
-        if self.dry_run:
-            data['dry_run'] = True
-        if self.notifications:
-            data['notifications'] = True
-        return data
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -91,28 +63,29 @@ class KeyboardHandler:
             return
 
         self.event_logs.setdefault(code, []).append(event)
-        if isinstance(current_bindings[code], str):
-            current_bindings[code] = {
-                'up': current_bindings[code]
-            }
-        if len(current_bindings[code].keys()) == 1 and 'hold' not in current_bindings[code]:
-            self.handle_event_now(event, code, current_bindings, layer_generation)
+        binding = current_bindings[code]
+        is_simple_binding = (
+            len(binding.actions) == 1
+            and binding.actions.keys().isdisjoint(DELAYED_EVENTS)
+        )
+        if is_simple_binding:
+            self.handle_event_now(event, code, binding, layer_generation)
         else:
-            self.handle_event(event, code, current_bindings, layer_generation)
+            self.handle_event(event, code, binding, layer_generation)
 
     def get_current_layer_bindings(self):
-        if self.active_layer and 'bindings' in self.layers[self.active_layer]:
+        if self.active_layer:
             print(f"Using layer {self.active_layer} bindings")
-            return self.layers[self.active_layer]['bindings']
+            return self.config.layers[self.active_layer].bindings
 
         print("Using base bindings")
-        return self.bindings
+        return self.config.bindings
 
-    def handle_event(self, event: KeyEvent, code, current_bindings, layer_generation=None):
+    def handle_event(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
         self._pending_events[code] = (
             self._clock() + EVENT_DEBOUNCE_SECONDS,
             event,
-            current_bindings,
+            binding,
             layer_generation,
         )
 
@@ -127,35 +100,31 @@ class KeyboardHandler:
             key=lambda code: self._pending_events[code][0],
         )
         for code in due_codes:
-            _, event, current_bindings, layer_generation = self._pending_events.pop(code)
-            self.handle_event_now(event, code, current_bindings, layer_generation)
+            _, event, binding, layer_generation = self._pending_events.pop(code)
+            self.handle_event_now(event, code, binding, layer_generation)
 
         if self._layer_deadline is not None and self._layer_deadline <= now:
             self.deactivate_layer()
 
-    def handle_event_now(self, event: KeyEvent, code, current_bindings, layer_generation=None):
+    def handle_event_now(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
         if layer_generation is not None and layer_generation != self._layer_generation:
             self.event_logs.pop(code, None)
             return
 
         try:
-            current_key_bindings = current_bindings[code]
             event_value = self._map_event(event, self.event_logs.get(code, []))
-            only_has_key_for_down = len(current_key_bindings.keys()) == 1 and 'down' in current_key_bindings
+            only_has_key_for_down = len(binding.actions) == 1 and 'down' in binding.actions
             if only_has_key_for_down and event_value == 'hold':
                 event_value = 'down'
 
             self.event_logs.pop(code, None)
-            if event_value not in current_key_bindings:
+            if event_value not in binding.actions:
                 print(f"No keybinding found for '{event_value}' on {event}")
                 return
 
             print(f"Commands found for '{event_value}' on {event}")
-            key_bindings = current_key_bindings[event_value]
-            if not isinstance(key_bindings, list):
-                key_bindings = [key_bindings]
-            for command in key_bindings:
-                if isinstance(command, str) and command.startswith('^'):
+            for command in binding.actions[event_value]:
+                if command.startswith('^'):
                     self.execute_handler_command(command[1:], code)
                 else:
                     print(f"Executing command '{command}' for '{event_value}' on {event}")
@@ -190,7 +159,7 @@ class KeyboardHandler:
             self.deactivate_layer()
 
     def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=5):
-        if layer_name in self.layers:
+        if layer_name in self.config.layers:
             self._cancel_layer_deadline()
             self._layer_generation += 1
             self.active_layer = layer_name

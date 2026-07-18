@@ -36,9 +36,23 @@ This document records the selected architecture direction. Each increment remain
 - Added coverage for deadline expiration and rescheduling from the latest event.
 - Verification: twelve tests pass, all Python files compile, and no handler timer threads remain.
 
+### Phase 1, Increment 3: Completed
+
+- Added a typed `ProfileConfig` boundary between YAML parsing and runtime handlers.
+- Added normalized `BindingConfig`, `LayerConfig`, and `KeyboardConfig` models.
+- Moved shorthand expansion and inline-layer normalization into profile parsing.
+- Changed `KeyboardHandler` to consume the combined `KeyboardConfig` without transforming or mutating it.
+- Added source-aware validation for profile fields, versions, bindings, events, layers, actions, and internal handler commands.
+- Added source-aware conflict diagnostics when merging profile fragments.
+- Reject duplicate YAML keys with filename and line diagnostics.
+- Made nested configuration mappings deeply immutable and multiprocessing-safe.
+- Removed the unused `dry_run` and `notifications` runtime options.
+- Migrated all seven active profiles to the current schema.
+- Verification: twenty-eight tests pass and all active profiles validate and merge into three device configurations.
+
 ### Next Increment
 
-Add typed profile validation with source-aware diagnostics and remove the unused `dry_run` and `notifications` options.
+Add stable structured device selectors while preserving attachment to all matching devices.
 
 ## Current Architecture
 
@@ -122,8 +136,8 @@ Control subprocess concurrency, dry-run behavior, logging, completion, and shutd
 1. [x] Fix profile serialization and add a generated-profile regression test.
 2. [x] Replace the global debounce timer with per-key state.
 3. [x] Run key-state transitions on one thread using monotonic deadlines or `tick(now)`.
-4. Add dataclass-based profile validation with precise diagnostics.
-5. Remove the unused `dry_run` and `notifications` options.
+4. [x] Add dataclass-based profile validation with precise diagnostics.
+5. [x] Remove the unused `dry_run` and `notifications` options.
 6. Generate stable structured selectors while preserving attachment to all matching devices.
 
 ### Phase 2: Runtime Reliability
