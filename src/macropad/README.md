@@ -1,8 +1,8 @@
 # Macropad Runtime Architecture
 
-This directory contains the complete runtime implementation for Macropad. The package intentionally
-uses a flat module layout: the codebase is small enough that domain-style subpackages would add
-navigation and dependency overhead without creating useful boundaries.
+This directory contains the complete runtime implementation for Macropad. Runtime domains use a
+flat module layout, while the `cli/` package groups command-specific orchestration behind a small
+argument-parsing and dispatch boundary.
 
 This document is the architecture reference for contributors. Update it whenever module ownership,
 dependency direction, process lifecycle, or the profile and event flows change.
@@ -12,7 +12,12 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | Module              | Responsibility                                                                                                                         |
 |---------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
-| `cli.py`            | Parses and dispatches commands, discovers profile files, coordinates profile reloads, and owns top-level shutdown.                    |
+| `cli/__init__.py`   | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
+| `cli/listen.py`     | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                  |
+| `cli/detect.py`     | Detects a new input device and optionally generates a sample profile.                                                                 |
+| `cli/validate.py`   | Resolves validation inputs and delegates the standalone validation workflow.                                                          |
+| `cli/profile_files.py` | Creates the default configuration and discovers unique profile files for CLI commands.                                             |
+| `cli/service.py`    | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                |
 | `profile_watcher.py` | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                   |
 | `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
 | `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
@@ -30,13 +35,23 @@ dependency direction, process lifecycle, or the profile and event flows change.
 
 ```mermaid
 flowchart TD
-    Entrypoints[macropad and python -m macropad] --> CLI[cli.py]
-    CLI --> Profiles[profiles.py]
-    CLI --> ProfileWatcher[profile_watcher.py]
-    CLI --> Validation[validation.py]
-    CLI --> Supervisor[supervisor.py]
-    CLI --> Interceptor[interceptor.py]
-    CLI --> Notifications[notifications.py]
+    Entrypoints[macropad and python -m macropad] --> CLI[cli/__init__.py]
+    CLI --> Listen[cli/listen.py]
+    CLI --> Detect[cli/detect.py]
+    CLI --> ValidateCommand[cli/validate.py]
+    CLI --> Service[cli/service.py]
+
+    Listen --> ProfileFiles[cli/profile_files.py]
+    Listen --> ProfileWatcher[profile_watcher.py]
+    Listen --> Supervisor[supervisor.py]
+    Listen --> Notifications[notifications.py]
+
+    Detect --> ProfileFiles
+    Detect --> Profiles[profiles.py]
+    Detect --> Interceptor[interceptor.py]
+
+    ValidateCommand --> ProfileFiles
+    ValidateCommand --> Validation[validation.py]
 
     Supervisor --> Profiles
     Supervisor --> Worker[worker.py]
@@ -46,6 +61,8 @@ flowchart TD
     Validation --> Config
     Profiles --> Config[config.py]
     ProfileWatcher --> Watchdog[watchdog]
+    Service --> Systemd[systemctl]
+    Service --> Journal[journalctl]
 
     Worker --> Handler[handlers.py]
     Worker --> Interceptor
@@ -64,6 +81,7 @@ system adapters. In particular:
 
 - `profiles.py` must remain independent of worker, handler, process, and device state.
 - `profile_watcher.py` owns filesystem event filtering and reload timing but never reloads profiles.
+- `cli/service.py` owns systemd and journal subprocess invocation but no daemon runtime state.
 - `supervisor.py` owns processes but does not process keyboard events.
 - `worker.py` is the boundary where immutable configuration becomes mutable runtime state.
 - `interceptor.py` owns evdev resources but does not construct or shut down handlers.
@@ -86,10 +104,11 @@ current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` configures logging, parses arguments, and dispatches to `run_listen()`,
-   `run_detect()`, or `run_validate()`.
-2. `run_listen()` initializes optional notifications and installs the parent SIGTERM handler.
-3. The CLI resolves explicit profile paths and all `.yml` files in requested profile directories.
+1. `cli.main()` configures logging, parses arguments, and dispatches to `cli.listen.run()`,
+   `cli.detect.run()`, `cli.validate.run()`, or `cli.service.run()`.
+2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
+3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
+   directories.
 4. `ProfileSupervisor.start()` calls `prepare_profiles()` before starting any process.
 5. Every YAML file is loaded and validated before fragments are merged by keyboard name.
 6. The supervisor creates one worker slot per merged `ProfileConfig` and starts `worker.run()` in a
@@ -101,10 +120,10 @@ current `/dev/input/event*` nodes with that name.
 If the default configuration directory is used, the CLI creates it when necessary, installs a sample
 profile if no YAML files exist, and automatically enables profile watching.
 
-The validation command delegates to `validation.run()`, which uses the same complete load,
+The validation command module delegates to `validation.run()`, which uses the same complete load,
 validation, grouping, and merge path as worker startup, but never initializes notifications,
-constructs a supervisor, or opens an input device. Semantic checks that depend on the complete
-device configuration, including layer references, run after fragments for that device are merged.
+constructs a supervisor, or opens an input device. Semantic checks that depend on the complete device
+configuration, including layer references, run after fragments for that device are merged.
 
 ## Input And Action Flow
 
@@ -157,14 +176,14 @@ always closed before it returns.
 
 The Watchdog polling observer runs in a background thread, but it never reloads configuration itself.
 It inspects both source and destination paths for each event and places every relevant `.yml` path
-into a queue owned by the CLI. This catches direct writes, create/delete events, profile renames, and
-atomic saves that move a temporary file onto a profile.
+into a queue owned by `cli.listen`. This catches direct writes, create/delete events, profile renames,
+and atomic saves that move a temporary file onto a profile.
 
 ```mermaid
 sequenceDiagram
     participant Watchdog
     participant Queue as Reload queue
-    participant CLI as Parent supervision loop
+    participant CLI as cli.listen parent loop
     participant Scheduler as Reload scheduler
     participant Supervisor as ProfileSupervisor
 
@@ -231,12 +250,14 @@ source names and field paths in every validation error because reload diagnostic
 - Add reconciliation, restart, or bounded-shutdown policy in `supervisor.py`.
 - Add Watchdog event handling, observer lifecycle, or reload debounce behavior in
   `profile_watcher.py`.
-- Add command-line orchestration in `cli.py`; create a command package only if command count or
-  complexity materially grows.
+- Add systemd lifecycle or journal command behavior in `cli/service.py`.
+- Add argument parsing and dispatch in `cli/__init__.py`, and command-specific orchestration in a
+  focused module under `cli/`.
 - Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in
   `profiles.py`.
 - Keep operating-system adapters optional or failure-tolerant where the service can continue without
   them.
 
-Unit tests mirror the runtime modules under `tests/test_*.py`. Packaging and lifecycle smoke tests
-live under `tests/integration/` and are intentionally excluded from normal unit-test discovery.
+Unit tests mirror flat runtime modules under `tests/test_*.py` and CLI modules under `tests/cli/`.
+Packaging and lifecycle smoke tests live under `tests/integration/` and are intentionally excluded
+from normal unit-test discovery.

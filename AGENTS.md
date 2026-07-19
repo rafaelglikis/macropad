@@ -12,8 +12,9 @@
 
 ## Runtime Architecture
 
-- Both `macropad` and `python -m macropad` enter through `src/macropad/cli.py`. The CLI coordinates top-level commands and is the only component that calls supervisor reloads; `profile_watcher.py` owns Watchdog event handling, observer lifecycle, and reload debounce state.
-- Keep `cli.py` limited to argument parsing and top-level orchestration. Do not let it become a catch-all for cohesive state machines, operating-system adapters, report rendering, or lifecycle helpers; put those concerns in focused flat modules and let the CLI coordinate them.
+- Both `macropad` and `python -m macropad` enter through `src/macropad/cli/__init__.py`, which parses arguments and dispatches to focused command modules. `cli/listen.py` is the only component that calls supervisor reloads; `profile_watcher.py` owns Watchdog event handling, observer lifecycle, and reload debounce state.
+- Keep `cli/__init__.py` limited to argument parsing, command dispatch, and global error handling. Put command workflows in focused modules under `cli/`, and keep reusable state machines, operating-system adapters, and report rendering outside the command package.
+- `cli/service.py` owns the service command actions and non-shelling invocations of `systemctl --user` and `journalctl --user`.
 - `ProfileSupervisor` validates and merges the complete candidate configuration before reconciliation, then owns one worker slot per keyboard name, process lifecycle, per-device retry backoff, and bounded graceful shutdown.
 - Each child enters through `worker.run`, constructs its own `KeyboardHandler`, then runs `interceptor.listen` to grab every current `/dev/input/event*` node whose keyboard name matches the profile. Keep delayed key/layer transitions monotonic and threadless; tests use fake clocks rather than sleeps.
 - Profiles are strict version `1` YAML. Fragments with the same device name merge before worker startup; duplicate keys, unknown fields/events/key names, and conflicts must retain source/path diagnostics.
@@ -31,4 +32,4 @@
 
 - The checked-in unit is `systemd/macropad.service.in`; `tools/render_systemd_unit.py` safely renders checkout paths. Use `make systemd` to validate and install it instead of editing `~/.config/systemd/user/macropad.service` directly.
 - The service runs this checkout's `.venv/bin/macropad`, not the user-level command installed by `make install-editable`; synchronize `.venv` before restarting it.
-- After runtime changes, use `make restart`, then verify with `make status` or `journalctl --user -u macropad.service`. The unit expects cooperative SIGTERM shutdown, `KillMode=mixed`, and a 10-second stop timeout.
+- After runtime changes, use `uv run macropad service restart`, then verify with `uv run macropad service status` or `journalctl --user -u macropad.service`. The unit expects cooperative SIGTERM shutdown, `KillMode=mixed`, and a 10-second stop timeout.

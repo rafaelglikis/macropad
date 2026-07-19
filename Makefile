@@ -1,4 +1,4 @@
-.PHONY: install install-editable sync test test-wheel test-service test-systemd lint format build render-systemd systemd enable start restart stop status logs
+.PHONY: install install-editable sync test test-wheel test-service test-systemd lint format build render-systemd systemd
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
@@ -54,27 +54,5 @@ systemd: test-systemd
 	@echo "✓ Systemd service created at $(SERVICE_FILE)"
 	@echo ""
 	@echo "To enable and start the service, run:"
-	@echo "  make enable"
-	@echo "  make start"
-
-enable:
-	systemctl --user enable macropad.service
-	@echo "✓ Service enabled (will start on login)"
-
-start:
-	systemctl --user start macropad.service
-	@echo "✓ Service started"
-
-restart:
-	systemctl --user restart macropad.service
-	@echo "✓ Service started"
-
-stop:
-	systemctl --user stop macropad.service
-	@echo "✓ Service stopped"
-
-status:
-	systemctl --user status macropad.service
-
-logs:
-	journalctl --user -u macropad.service -f
+	@echo "  uv run macropad service enable"
+	@echo "  uv run macropad service start"

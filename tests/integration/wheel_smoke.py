@@ -55,8 +55,13 @@ def main() -> None:
             required_members = {
                 'macropad/__init__.py',
                 'macropad/__main__.py',
-                'macropad/cli.py',
                 'macropad/assets/macropad.svg',
+                'macropad/cli/__init__.py',
+                'macropad/cli/detect.py',
+                'macropad/cli/listen.py',
+                'macropad/cli/profile_files.py',
+                'macropad/cli/service.py',
+                'macropad/cli/validate.py',
             }
             missing_members = required_members - members
             if missing_members:

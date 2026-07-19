@@ -232,13 +232,25 @@ Install and start the systemd user service:
 
 ```bash
 make systemd
-make enable
-make start
+uv run macropad service enable
+uv run macropad service start
 ```
 
 `make systemd` renders the checked-in unit template for the current checkout and validates it before installation.
 
-Use `make status`, `make logs`, and `make restart` to manage it.
+Manage the installed unit through the CLI:
+
+```bash
+uv run macropad service status
+uv run macropad service logs
+uv run macropad service restart
+uv run macropad service stop
+uv run macropad service disable
+```
+
+`service logs` follows the systemd journal until interrupted. These commands preserve the output and
+exit status from `systemctl --user` or `journalctl --user`. Use `macropad listen` instead when running
+Macropad directly in the foreground.
 
 ## Development
 
