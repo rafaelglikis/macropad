@@ -214,6 +214,24 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(profile_config, restored_config)
 
+    def test_layer_reference_metadata_remains_picklable(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': {'up': '^layer navigation'}},
+                layers={
+                    'navigation': {
+                        'bindings': {
+                            'KEY_H': 'move-left',
+                        },
+                    },
+                },
+            )
+        )
+
+        restored_config = pickle.loads(pickle.dumps(profile_config))
+
+        self.assertEqual(profile_config.layer_references, restored_config.layer_references)
+
     def test_merge_combines_typed_profile_fragments(self):
         first = profiles.validate_profile_data(
             self._profile_data(bindings={'KEY_A': 'a-command'}),
@@ -249,6 +267,82 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(
             'second.yml: bindings.KEY_A.up: conflicts with an earlier profile fragment',
+            str(context.exception),
+        )
+
+    def test_merge_allows_layer_reference_defined_by_another_fragment(self):
+        binding_fragment = profiles.validate_profile_data(
+            self._profile_data(bindings={'KEY_A': {'up': '^layer navigation'}}),
+            source='bindings.yml',
+        )
+        layer_fragment = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={},
+                layers={
+                    'navigation': {
+                        'bindings': {
+                            'KEY_H': 'move-left',
+                        },
+                    },
+                },
+            ),
+            source='layers.yml',
+        )
+
+        merged = profiles.merge_data([binding_fragment, layer_fragment])
+
+        self.assertIn('navigation', merged.keyboard.layers)
+
+    def test_merge_rejects_reference_to_unknown_layer(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(bindings={'KEY_A': {'up': '^layer missing'}}),
+            source='broken.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([profile_config])
+
+        self.assertEqual(
+            "broken.yml: bindings.KEY_A.up: references unknown layer 'missing'",
+            str(context.exception),
+        )
+
+    def test_merge_reports_original_path_for_unknown_inline_layer_reference(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {
+                        'up': 'base-command',
+                        'layers': {
+                            'navigation': {
+                                'up': '^layer missing',
+                            },
+                        },
+                    },
+                }
+            ),
+            source='inline.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([profile_config])
+
+        self.assertEqual(
+            "inline.yml: bindings.KEY_A.layers.navigation.up: references unknown layer 'missing'",
+            str(context.exception),
+        )
+
+    def test_merge_rejects_profile_without_reachable_base_action(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(bindings={}),
+            source='empty.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([profile_config])
+
+        self.assertEqual(
+            "device 'Demo Device': bindings: expected at least one reachable base action",
             str(context.exception),
         )
 

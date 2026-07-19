@@ -9,20 +9,21 @@ dependency direction, process lifecycle, or the profile and event flows change.
 
 ## Module Map
 
-| Module | Responsibility |
-| --- | --- |
-| `__main__.py` | Implements the `python -m macropad` entry point by delegating to `cli.main()`. |
-| `cli.py` | Parses arguments, dispatches commands, discovers profile files, owns profile watching, and coordinates top-level shutdown. |
-| `config.py` | Defines the deeply immutable, picklable profile configuration model and validation error type. |
-| `profiles.py` | Loads strict YAML, validates and normalizes profile data, merges fragments, serializes configurations, and creates sample configurations. |
-| `supervisor.py` | Reconciles desired profiles with worker slots, owns child processes, applies restart backoff, and enforces bounded shutdown. |
-| `worker.py` | Defines the child-process entry point, installs the worker signal handler, constructs the keyboard handler, and owns handler shutdown. |
-| `interceptor.py` | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler. |
-| `handlers.py` | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions. |
-| `actions.py` | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit. |
-| `notifications.py` | Initializes optional desktop notifications and sends notifications without making them a runtime requirement. |
-| `logging_config.py` | Configures structured console logging and renders known context fields consistently. |
-| `assets/` | Contains package resources, currently the desktop notification icon. |
+| Module              | Responsibility                                                                                                                         |
+|---------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
+| `cli.py`            | Parses and dispatches commands, discovers profile files, owns profile watching, and coordinates top-level shutdown.                    |
+| `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
+| `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
+| `profiles.py`       | Loads strict YAML, validates, normalizes, groups, and merges profiles, serializes configurations, and creates samples.                 |
+| `supervisor.py`     | Reconciles desired profiles with worker slots, owns child processes, applies restart backoff, and enforces bounded shutdown.           |
+| `worker.py`         | Defines the child-process entry point, installs the worker signal handler, constructs the keyboard handler, and owns handler shutdown. |
+| `interceptor.py`    | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler.        |
+| `handlers.py`       | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions.                            |
+| `actions.py`        | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit.                                      |
+| `notifications.py`  | Initializes optional desktop notifications and sends notifications without making them a runtime requirement.                          |
+| `logging_config.py` | Configures structured console logging and renders known context fields consistently.                                                   |
+| `assets/`           | Contains package resources, currently the desktop notification icon.                                                                   |
 
 ## Dependency Diagram
 
@@ -30,6 +31,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli.py]
     CLI --> Profiles[profiles.py]
+    CLI --> Validation[validation.py]
     CLI --> Supervisor[supervisor.py]
     CLI --> Interceptor[interceptor.py]
     CLI --> Notifications[notifications.py]
@@ -38,6 +40,8 @@ flowchart TD
     Supervisor --> Worker[worker.py]
     Supervisor --> Interceptor
 
+    Validation --> Profiles
+    Validation --> Config
     Profiles --> Config[config.py]
 
     Worker --> Handler[handlers.py]
@@ -78,8 +82,8 @@ current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` configures logging, parses arguments, and dispatches to `run_listen()` or
-   `run_detect()`.
+1. `cli.main()` configures logging, parses arguments, and dispatches to `run_listen()`,
+   `run_detect()`, or `run_validate()`.
 2. `run_listen()` initializes optional notifications and installs the parent SIGTERM handler.
 3. The CLI resolves explicit profile paths and all `.yml` files in requested profile directories.
 4. `ProfileSupervisor.start()` calls `prepare_profiles()` before starting any process.
@@ -92,6 +96,11 @@ current `/dev/input/event*` nodes with that name.
 
 If the default configuration directory is used, the CLI creates it when necessary, installs a sample
 profile if no YAML files exist, and automatically enables profile watching.
+
+The validation command delegates to `validation.run()`, which uses the same complete load,
+validation, grouping, and merge path as worker startup, but never initializes notifications,
+constructs a supervisor, or opens an input device. Semantic checks that depend on the complete
+device configuration, including layer references, run after fragments for that device are merged.
 
 ## Input And Action Flow
 
@@ -171,8 +180,8 @@ prevent headless startup or event handling.
 
 `config.py` contains only immutable value objects:
 
-- `ProfileConfig` owns the device name, profile version, keyboard configuration, and diagnostic
-  source.
+- `ProfileConfig` owns the device name, profile version, keyboard configuration, diagnostic source,
+  and deferred layer-reference paths used by merged validation.
 - `KeyboardConfig` owns base bindings and named layers.
 - `LayerConfig` owns layer bindings.
 - `BindingConfig` maps event names to command tuples.
@@ -191,6 +200,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add reconciliation, restart, or bounded-shutdown policy in `supervisor.py`.
 - Add command-line orchestration in `cli.py`; create a command package only if command count or
   complexity materially grows.
+- Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in
+  `profiles.py`.
 - Keep operating-system adapters optional or failure-tolerant where the service can continue without
   them.
 

@@ -1,7 +1,9 @@
 import errno
+import pathlib
 import queue
 import runpy
 import signal
+import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
@@ -53,6 +55,78 @@ class ProfileReloadTests(unittest.TestCase):
             title='Macropad Configuration Updated',
             message='Successfully reloaded 2 profile(s)',
         )
+
+
+class ProfilePathTests(unittest.TestCase):
+    def test_explicit_and_directory_paths_are_deduplicated(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            profile_directory = pathlib.Path(temp_directory)
+            profile_path = profile_directory / 'macros.yml'
+            profile_path.write_text('profile')
+            args = SimpleNamespace(
+                profile_paths=[str(profile_path)],
+                profile_directories=[str(profile_directory)],
+            )
+
+            profile_paths = cli.get_profile_paths(args)
+
+        self.assertEqual([str(profile_path)], profile_paths)
+
+
+class ProfileValidationCommandTests(unittest.TestCase):
+    def test_validate_resolves_profile_paths_and_runs_validation(self):
+        args = SimpleNamespace(
+            profile_paths=['/profiles/first.yml'],
+            profile_directories=['/profiles/fragments'],
+        )
+        profile_paths = ['/profiles/first.yml', '/profiles/fragments/second.yml']
+
+        with (
+            patch('macropad.cli.get_profile_paths', return_value=profile_paths),
+            patch('macropad.cli.validation.run', return_value=0) as run_validation,
+        ):
+            exit_status = cli.run_validate(args)
+
+        self.assertEqual(0, exit_status)
+        run_validation.assert_called_once_with(profile_paths)
+
+    def test_validate_uses_default_directory_without_creating_it(self):
+        args = SimpleNamespace(profile_paths=[], profile_directories=None)
+
+        with (
+            patch('macropad.cli.get_profile_paths', return_value=[]) as get_profile_paths,
+            patch('macropad.cli.ensure_default_config') as ensure_default_config,
+        ):
+            exit_status = cli.run_validate(args)
+
+        self.assertEqual(1, exit_status)
+        self.assertEqual([str(cli.DEFAULT_CONFIG_DIR)], args.profile_directories)
+        get_profile_paths.assert_called_once_with(args)
+        ensure_default_config.assert_not_called()
+
+    def test_validate_arguments_support_files_and_directories(self):
+        with patch(
+            'sys.argv',
+            ['macropad', 'validate', 'primary.yml', '-d', 'fragments', '-d', 'more'],
+        ):
+            args = cli.parse_args()
+
+        self.assertEqual('validate', args.subcommand)
+        self.assertEqual(['primary.yml'], args.profile_paths)
+        self.assertEqual(['fragments', 'more'], args.profile_directories)
+
+    def test_main_dispatches_validate_command(self):
+        args = SimpleNamespace(subcommand='validate')
+
+        with (
+            patch('macropad.cli.configure_logging'),
+            patch('macropad.cli.parse_args', return_value=args),
+            patch('macropad.cli.run_validate', return_value=0) as run_validate,
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(0, exit_status)
+        run_validate.assert_called_once_with(args)
 
 
 class SupervisionCycleTests(unittest.TestCase):

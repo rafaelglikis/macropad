@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import yaml
 from evdev import ecodes
 
@@ -5,6 +7,7 @@ from .config import (
     BindingConfig,
     KeyboardConfig,
     LayerConfig,
+    LayerReference,
     ProfileConfig,
     ProfileValidationError,
 )
@@ -16,6 +19,16 @@ KEY_NAMES = {
     for key_names in ecodes.KEY.values()
     for key_name in (key_names if isinstance(key_names, list) else [key_names])
 }
+
+
+@dataclass(frozen=True)
+class PreparedProfile:
+    paths: tuple[str, ...]
+    config: ProfileConfig
+
+    @property
+    def device_name(self) -> str:
+        return self.config.device
 
 
 class StrictSafeLoader(yaml.SafeLoader):
@@ -98,6 +111,7 @@ def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileCon
         version=version,
         keyboard=KeyboardConfig(bindings=bindings, layers=layers),
         source=source,
+        layer_references=_collect_layer_references(profile_data),
     )
 
 
@@ -257,6 +271,57 @@ def _parse_action(action, source: str, path: str) -> str:
     raise ProfileValidationError(source, path, f'invalid handler command {action!r}')
 
 
+def _collect_layer_references(profile_data: dict) -> tuple[LayerReference, ...]:
+    references = []
+    _collect_binding_references(profile_data.get('bindings', {}), 'bindings', references)
+    for layer_name, layer in profile_data.get('layers', {}).items():
+        _collect_binding_references(
+            layer['bindings'],
+            f'layers.{layer_name}.bindings',
+            references,
+        )
+    return tuple(references)
+
+
+def _collect_binding_references(
+    bindings: dict,
+    bindings_path: str,
+    references: list[LayerReference],
+) -> None:
+    for key_name, binding in bindings.items():
+        binding_path = f'{bindings_path}.{key_name}'
+        if isinstance(binding, str):
+            _collect_action_references(binding, binding_path, references)
+            continue
+
+        for event_name, actions in binding.items():
+            event_path = f'{binding_path}.{event_name}'
+            if event_name != 'layers':
+                _collect_action_references(actions, event_path, references)
+                continue
+            for layer_name, layer_binding in actions.items():
+                for layer_event_name, layer_actions in layer_binding.items():
+                    _collect_action_references(
+                        layer_actions,
+                        f'{event_path}.{layer_name}.{layer_event_name}',
+                        references,
+                    )
+
+
+def _collect_action_references(
+    actions,
+    path: str,
+    references: list[LayerReference],
+) -> None:
+    commands = [actions] if isinstance(actions, str) else actions
+    for index, command in enumerate(commands):
+        command_parts = command[1:].split() if command.startswith('^') else []
+        if command_parts[:1] != ['layer']:
+            continue
+        command_path = path if isinstance(actions, str) else f'{path}[{index}]'
+        references.append(LayerReference(name=command_parts[1], path=command_path))
+
+
 def _merge_layers(
     target_layers: dict[str, LayerConfig],
     source_layers: dict[str, LayerConfig],
@@ -339,12 +404,62 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
             )
         merged_layers = _merge_layers(merged_layers, config.keyboard.layers, config.source)
 
-    return ProfileConfig(
+    merged_profile = ProfileConfig(
         device=device,
         version=version,
         keyboard=KeyboardConfig(bindings=merged_bindings, layers=merged_layers),
         source='<merged profile>',
     )
+    _validate_merged_profile(profile_datas, merged_profile)
+    return merged_profile
+
+
+def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
+    loaded_profiles = []
+    for profile_path in profile_paths:
+        loaded_profiles.append((profile_path, load_yml(profile_path)))
+
+    return prepare_loaded_profiles(loaded_profiles)
+
+
+def prepare_loaded_profiles(
+    loaded_profiles: list[tuple[str, ProfileConfig]],
+) -> list[PreparedProfile]:
+    profiles_by_device = {}
+
+    for profile_path, profile_data in loaded_profiles:
+        profiles_by_device.setdefault(profile_data.device, []).append((profile_path, profile_data))
+
+    prepared_profiles = []
+    for profile_fragments in profiles_by_device.values():
+        paths = tuple(profile_path for profile_path, _ in profile_fragments)
+        config = merge_data([profile_data for _, profile_data in profile_fragments])
+        prepared_profiles.append(PreparedProfile(paths, config))
+
+    return prepared_profiles
+
+
+def _validate_merged_profile(
+    profile_fragments: list[ProfileConfig], merged_profile: ProfileConfig
+) -> None:
+    has_base_action = any(binding.actions for binding in merged_profile.keyboard.bindings.values())
+    if not has_base_action:
+        raise ProfileValidationError(
+            f'device {merged_profile.device!r}',
+            'bindings',
+            'expected at least one reachable base action',
+        )
+
+    layer_names = set(merged_profile.keyboard.layers)
+    for profile_fragment in profile_fragments:
+        for reference in profile_fragment.layer_references:
+            if reference.name in layer_names:
+                continue
+            raise ProfileValidationError(
+                profile_fragment.source,
+                reference.path,
+                f'references unknown layer {reference.name!r}',
+            )
 
 
 def create_sample(device_name: str) -> ProfileConfig:

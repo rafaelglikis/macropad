@@ -42,6 +42,9 @@ class FrozenDict(Mapping[Key, Value], Generic[Key, Value]):
 
 class ProfileValidationError(ValueError):
     def __init__(self, source: str, path: str, message: str):
+        self.source = source
+        self.path = path
+        self.message = message
         location = f'{source}: {path}' if path else source
         super().__init__(f'{location}: {message}')
 
@@ -101,11 +104,21 @@ class KeyboardConfig:
 
 
 @dataclass(frozen=True)
+class LayerReference:
+    name: str
+    path: str
+
+
+@dataclass(frozen=True)
 class ProfileConfig:
     device: str
     version: str
     keyboard: KeyboardConfig
     source: str = field(default='<profile>', repr=False, compare=False)
+    layer_references: tuple[LayerReference, ...] = field(default=(), repr=False, compare=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, 'layer_references', tuple(self.layer_references))
 
     def to_data(self) -> dict:
         return {

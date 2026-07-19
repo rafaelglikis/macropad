@@ -6,7 +6,7 @@ from typing import Any
 
 from . import interceptor, profiles
 from . import worker as worker_runtime
-from .config import ProfileConfig
+from .profiles import PreparedProfile
 
 RESTART_INITIAL_DELAY_SECONDS = 1.0
 RESTART_MAX_DELAY_SECONDS = 30.0
@@ -14,16 +14,6 @@ RESTART_STABLE_SECONDS = 30.0
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
 KILL_JOIN_TIMEOUT_SECONDS = 1.0
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PreparedProfile:
-    paths: tuple[str, ...]
-    config: ProfileConfig
-
-    @property
-    def device_name(self) -> str:
-        return self.config.device
 
 
 @dataclass
@@ -41,19 +31,7 @@ class Worker:
 
 
 def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
-    profiles_by_device = {}
-
-    for profile_path in profile_paths:
-        profile_data = profiles.load_yml(profile_path)
-        profiles_by_device.setdefault(profile_data.device, []).append((profile_path, profile_data))
-
-    prepared_profiles = []
-    for profile_fragments in profiles_by_device.values():
-        paths = tuple(profile_path for profile_path, _ in profile_fragments)
-        config = profiles.merge_data([profile_data for _, profile_data in profile_fragments])
-        prepared_profiles.append(PreparedProfile(paths, config))
-
-    return prepared_profiles
+    return profiles.prepare_profiles(profile_paths)
 
 
 class ProfileSupervisor:

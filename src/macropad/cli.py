@@ -12,7 +12,7 @@ import argcomplete
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
-from . import interceptor, notifications, profiles
+from . import interceptor, notifications, profiles, validation
 from .logging_config import configure_logging
 from .supervisor import ProfileSupervisor
 
@@ -94,7 +94,15 @@ def get_profile_paths(args: argparse.Namespace) -> list[str]:
             yml_files = sorted(dir_path.glob('*.yml'))
             all_profile_paths.extend(str(f) for f in yml_files)
 
-    return all_profile_paths
+    unique_profile_paths = []
+    seen_paths = set()
+    for profile_path in all_profile_paths:
+        canonical_path = pathlib.Path(profile_path).expanduser().resolve(strict=False)
+        if canonical_path in seen_paths:
+            continue
+        seen_paths.add(canonical_path)
+        unique_profile_paths.append(profile_path)
+    return unique_profile_paths
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,6 +115,23 @@ def parse_args() -> argparse.Namespace:
         help='Generates a profile for the given device.',
         action='store_true',
         dest='generate_profile',
+    )
+
+    validate_subparser = subparsers.add_parser(
+        'validate',
+        help='Validate profiles without opening input devices',
+        description='Load, validate, and merge profiles without opening input devices.',
+        epilog='See README.md#profile-format for the complete profile format.',
+    )
+    validate_subparser.add_argument(
+        'profile_paths', nargs='*', help='Paths to macropad profile files.'
+    )
+    validate_subparser.add_argument(
+        '--directory',
+        '-d',
+        action='append',
+        dest='profile_directories',
+        help='Directory containing profile files (.yml). Can be specified multiple times.',
     )
 
     listen_subparser = subparsers.add_parser('listen', help='Intercept profile device')
@@ -295,13 +320,26 @@ def run_detect(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_validate(args: argparse.Namespace) -> int:
+    if not args.profile_paths and not args.profile_directories:
+        args.profile_directories = [str(DEFAULT_CONFIG_DIR)]
+
+    profile_paths = get_profile_paths(args)
+    if not profile_paths:
+        logger.error('no profile files found')
+        return 1
+    return validation.run(profile_paths)
+
+
 def main() -> int:
     configure_logging()
     try:
         args = parse_args()
         if args.subcommand == 'listen':
             return run_listen(args)
-        return run_detect(args)
+        if args.subcommand == 'detect':
+            return run_detect(args)
+        return run_validate(args)
     except KeyboardInterrupt:
         logger.info('keyboard interrupt received; exiting')
     except OSError as error:

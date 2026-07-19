@@ -37,7 +37,7 @@ Macropad already provides:
 
 ### 1. Expose Profile Validation And Document The Schema
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Let users validate and understand profiles without starting the daemon or grabbing a device.
 
