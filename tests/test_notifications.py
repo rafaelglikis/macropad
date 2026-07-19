@@ -5,6 +5,12 @@ from macropad import notifications
 
 
 class NotificationTests(unittest.TestCase):
+    def test_backend_rejection_is_reported_as_unavailable(self):
+        with patch('macropad.notifications.notify2.init', return_value=False):
+            error = notifications.check_availability()
+
+        self.assertEqual('notification backend did not initialize', error)
+
     def test_initialization_failure_is_nonfatal(self):
         with (
             patch(

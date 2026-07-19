@@ -1,11 +1,119 @@
 import errno
 import logging
 import time
+from dataclasses import dataclass
 
 import evdev
 from evdev import InputDevice
 
 logger = logging.getLogger(__name__)
+DEVICE_GONE_ERRNOS = (errno.ENOENT, errno.ENODEV)
+_reported_device_errors: set[tuple[str, str, int | None]] = set()
+
+
+@dataclass(frozen=True)
+class DeviceAccessProbe:
+    path: str
+    device_name: str | None = None
+    operation: str | None = None
+    error_number: int | None = None
+    error: str | None = None
+
+
+def probe_device_access() -> list[DeviceAccessProbe]:
+    try:
+        paths = sorted(evdev.list_devices())
+    except OSError as error:
+        return [
+            DeviceAccessProbe(
+                path='/dev/input',
+                operation='enumerate',
+                error_number=error.errno,
+                error=str(error),
+            )
+        ]
+
+    probes = []
+    for path in paths:
+        try:
+            device = InputDevice(path)
+        except OSError as error:
+            probes.append(
+                DeviceAccessProbe(
+                    path=path,
+                    operation='open',
+                    error_number=error.errno,
+                    error=str(error),
+                )
+            )
+            continue
+
+        try:
+            try:
+                device.grab()
+            except OSError as error:
+                probes.append(
+                    DeviceAccessProbe(
+                        path=path,
+                        device_name=device.name,
+                        operation='grab',
+                        error_number=error.errno,
+                        error=str(error),
+                    )
+                )
+                continue
+
+            try:
+                device.ungrab()
+            except OSError as error:
+                probes.append(
+                    DeviceAccessProbe(
+                        path=path,
+                        device_name=device.name,
+                        operation='ungrab',
+                        error_number=error.errno,
+                        error=str(error),
+                    )
+                )
+                continue
+            probes.append(DeviceAccessProbe(path=path, device_name=device.name))
+        finally:
+            device.close()
+    return probes
+
+
+def _log_device_error(
+    error: OSError,
+    operation: str,
+    path: str,
+    device_name: str | None = None,
+) -> None:
+    error_key = (operation, path, error.errno)
+    if error_key in _reported_device_errors:
+        return
+    _reported_device_errors.add(error_key)
+
+    if error.errno == errno.EACCES:
+        message = 'input device permission denied'
+    elif error.errno == errno.EBUSY:
+        message = 'input device already exclusively grabbed'
+    else:
+        message = f'input device {operation} failed'
+    logger.error(
+        message,
+        extra={
+            'device': device_name,
+            'path': path,
+            'error': str(error),
+        },
+    )
+
+
+def _clear_device_error(operation: str, path: str) -> None:
+    resolved_errors = {
+        error_key for error_key in _reported_device_errors if error_key[:2] == (operation, path)
+    }
+    _reported_device_errors.difference_update(resolved_errors)
 
 
 def matching_device_paths(device_name: str) -> list[str]:
@@ -14,9 +122,17 @@ def matching_device_paths(device_name: str) -> list[str]:
     for path in evdev.list_devices():
         try:
             device = InputDevice(path)
-        except OSError:
+        except OSError as error:
+            if error.errno in DEVICE_GONE_ERRNOS:
+                logger.info(
+                    'input device disappeared during scan',
+                    extra={'path': path},
+                )
+                continue
+            _log_device_error(error, 'open', path)
             continue
 
+        _clear_device_error('open', path)
         try:
             if device.name == device_name:
                 matching_paths.append(path)
@@ -68,7 +184,7 @@ def detect() -> str:
                 print_device_info(device)
                 return device.name
             except OSError as error:
-                if error.errno != errno.ENODEV:
+                if error.errno not in DEVICE_GONE_ERRNOS:
                     raise
                 candidate_paths.discard(device_path)
             finally:
@@ -97,9 +213,15 @@ def listen(device_name, handler, shutdown_event):
                     except OSError as error:
                         if device:
                             device.close()
-                        if error.errno != errno.ENODEV:
+                        if error.errno not in DEVICE_GONE_ERRNOS:
+                            _log_device_error(error, 'grab', path, device_name)
                             raise
+                        logger.info(
+                            'input device disappeared before grab',
+                            extra={'device': device_name, 'path': path},
+                        )
                         continue
+                    _clear_device_error('grab', path)
                     devices[path] = device
                 last_scan = current_time
 
@@ -108,7 +230,8 @@ def listen(device_name, handler, shutdown_event):
                     while not shutdown_event.is_set() and (event := device.read_one()):
                         handler.handle(event)
                 except OSError as error:
-                    if error.errno != errno.ENODEV:
+                    if error.errno not in DEVICE_GONE_ERRNOS:
+                        _log_device_error(error, 'read', path, device_name)
                         raise
                     logger.warning(
                         'input device lost',

@@ -14,10 +14,12 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
 | `cli/__init__.py`   | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
 | `cli/listen.py`     | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                  |
+| `cli/doctor.py`     | Renders read-only environment diagnostics and returns status based on blocking results.                                               |
 | `cli/validate.py`   | Resolves validation inputs and delegates the standalone validation workflow.                                                          |
 | `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                           |
 | `cli/service.py`    | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                |
 | `profile_watcher.py` | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                   |
+| `diagnostics.py`    | Classifies input access, profiles, notifications, installation paths, and environment checks.                                         |
 | `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
 | `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
 | `profiles.py`       | Loads strict YAML and validates, normalizes, groups, and merges profile configurations.                                               |
@@ -36,6 +38,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli/__init__.py]
     CLI --> Listen[cli/listen.py]
+    CLI --> Doctor[cli/doctor.py]
     CLI --> ValidateCommand[cli/validate.py]
     CLI --> Service[cli/service.py]
 
@@ -43,6 +46,12 @@ flowchart TD
     Listen --> ProfileWatcher[profile_watcher.py]
     Listen --> Supervisor[supervisor.py]
     Listen --> Notifications[notifications.py]
+
+    Doctor --> Diagnostics[diagnostics.py]
+    Doctor --> ProfileFiles
+    Doctor --> Service
+    Diagnostics --> Interceptor[interceptor.py]
+    Diagnostics --> Notifications
 
     ValidateCommand --> ProfileFiles
     ValidateCommand --> Validation[validation.py]
@@ -75,6 +84,8 @@ system adapters. In particular:
 
 - `profiles.py` must remain independent of worker, handler, process, and device state.
 - `profile_watcher.py` owns filesystem event filtering and reload timing but never reloads profiles.
+- `diagnostics.py` classifies checks but leaves evdev and systemd resource ownership in their
+  existing adapters.
 - `cli/service.py` owns systemd and journal subprocess invocation but no daemon runtime state.
 - `supervisor.py` owns processes but does not process keyboard events.
 - `worker.py` is the boundary where immutable configuration becomes mutable runtime state.
@@ -98,8 +109,8 @@ current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` configures logging, parses arguments, and dispatches to `cli.listen.run()`,
-   `cli.validate.run()`, or `cli.service.run()`.
+1. `cli.main()` configures logging, parses arguments, and dispatches to `cli.doctor.run()`,
+   `cli.listen.run()`, `cli.validate.run()`, or `cli.service.run()`.
 2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
 3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
    directories.
@@ -156,12 +167,21 @@ through a login shell.
 ## Device Lifecycle
 
 `matching_device_paths()` enumerates evdev paths, opens each path long enough to inspect its name, and
-closes every probe. Paths that disappear during enumeration are ignored.
+closes every probe. Paths that disappear during enumeration are ignored. Permission failures and
+other open errors are logged once per unresolved operation and path rather than silently treated as
+an absent device or repeatedly flooding the journal.
 
 The listener opens and exclusively grabs all paths matching the configured keyboard name. When a
 path reports `ENODEV`, it is closed and removed. The listener rescans only after every matching path
 has gone; it intentionally does not acquire an additional path while another matching path remains
 connected.
+
+`probe_device_access()` briefly opens, grabs, ungrabs, and closes each current event device for
+`macropad doctor`. It records `EACCES`, `EBUSY`, `ENODEV`, and other operation failures as data so the
+diagnostic workflow can provide remediation without leaking handles. Runtime grab conflicts and
+permission failures are logged distinctly before a worker exits or continues scanning.
+An `EBUSY` probe is a nonblocking warning when the Macropad user service is active and a blocking
+failure otherwise; stopping the service and rerunning the check disambiguates ownership.
 
 The internal `detect()` helper snapshots existing paths, waits for a new path even when another
 device disappears at the same time, and returns the new keyboard's name after observing a pressed
@@ -247,6 +267,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add Watchdog event handling, observer lifecycle, or reload debounce behavior in
   `profile_watcher.py`.
 - Add systemd lifecycle or journal command behavior in `cli/service.py`.
+- Add diagnostic checks and remediation in `diagnostics.py`, keeping command rendering in
+  `cli/doctor.py` and operating-system resource handling in the owning adapter.
 - Add argument parsing and dispatch in `cli/__init__.py`, and command-specific orchestration in a
   focused module under `cli/`.
 - Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in

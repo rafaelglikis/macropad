@@ -6,7 +6,7 @@ import logging
 import argcomplete
 
 from ..logging_config import configure_logging
-from . import listen, service, validate
+from . import doctor, listen, service, validate
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,11 @@ def parse_args() -> argparse.Namespace:
         action='append',
         dest='profile_directories',
         help='Directory containing profile files (.yml). Can be specified multiple times.',
+    )
+
+    subparsers.add_parser(
+        'doctor',
+        help='Check input permissions and runtime environment',
     )
 
     listen_subparser = subparsers.add_parser('listen', help='Intercept profile device')
@@ -78,6 +83,8 @@ def main() -> int:
     configure_logging()
     try:
         args = parse_args()
+        if args.subcommand == 'doctor':
+            return doctor.run()
         if args.subcommand == 'service':
             return service.run(args.service_action)
         if args.subcommand == 'listen':

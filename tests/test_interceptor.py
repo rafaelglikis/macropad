@@ -14,12 +14,16 @@ class FakeInputDevice:
         self._active_keys = active_keys
         self.closed = False
         self.grabbed = False
+        self.ungrabbed = False
 
     def close(self):
         self.closed = True
 
     def grab(self):
         self.grabbed = True
+
+    def ungrab(self):
+        self.ungrabbed = True
 
     def read_one(self):
         return None
@@ -29,6 +33,9 @@ class FakeInputDevice:
 
 
 class DeviceMatchingTests(unittest.TestCase):
+    def setUp(self):
+        interceptor._reported_device_errors.clear()
+
     def test_matching_paths_returns_every_device_with_matching_name(self):
         devices = {
             '/dev/input/event1': FakeInputDevice('/dev/input/event1', 'Macro Keyboard'),
@@ -65,6 +72,84 @@ class DeviceMatchingTests(unittest.TestCase):
             ),
         ):
             self.assertFalse(interceptor.has_device('Macro Keyboard'))
+
+    def test_permission_failure_is_reported_instead_of_silently_ignored(self):
+        error = OSError(errno.EACCES, 'permission denied')
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=['/dev/input/event1']),
+            patch('macropad.interceptor.InputDevice', side_effect=error),
+            patch('macropad.interceptor.logger') as logger,
+        ):
+            self.assertFalse(interceptor.has_device('Macro Keyboard'))
+            self.assertFalse(interceptor.has_device('Macro Keyboard'))
+
+        logger.error.assert_called_once_with(
+            'input device permission denied',
+            extra={
+                'device': None,
+                'path': '/dev/input/event1',
+                'error': '[Errno 13] permission denied',
+            },
+        )
+
+    def test_successful_open_allows_a_later_failure_to_be_reported(self):
+        error = OSError(errno.EACCES, 'permission denied')
+        device = FakeInputDevice('/dev/input/event1', 'Other Keyboard')
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', side_effect=[error, device, error]),
+            patch('macropad.interceptor.logger') as logger,
+        ):
+            self.assertFalse(interceptor.has_device('Macro Keyboard'))
+            self.assertFalse(interceptor.has_device('Macro Keyboard'))
+            self.assertFalse(interceptor.has_device('Macro Keyboard'))
+
+        self.assertEqual(2, logger.error.call_count)
+
+
+class DeviceAccessProbeTests(unittest.TestCase):
+    def test_probe_grabs_ungrabs_and_closes_accessible_device(self):
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+        ):
+            probes = interceptor.probe_device_access()
+
+        self.assertEqual(
+            [interceptor.DeviceAccessProbe(device.path, device.name)],
+            probes,
+        )
+        self.assertTrue(device.grabbed)
+        self.assertTrue(device.ungrabbed)
+        self.assertTrue(device.closed)
+
+    def test_probe_reports_open_and_grab_failures(self):
+        busy_device = FakeInputDevice('/dev/input/event2', 'Busy Keyboard')
+        busy_device.grab = Mock(side_effect=OSError(errno.EBUSY, 'device busy'))
+
+        def open_device(path):
+            if path == '/dev/input/event1':
+                raise OSError(errno.EACCES, 'permission denied')
+            return busy_device
+
+        with (
+            patch(
+                'macropad.interceptor.evdev.list_devices',
+                return_value=['/dev/input/event1', '/dev/input/event2'],
+            ),
+            patch('macropad.interceptor.InputDevice', side_effect=open_device),
+        ):
+            probes = interceptor.probe_device_access()
+
+        self.assertEqual(errno.EACCES, probes[0].error_number)
+        self.assertEqual('open', probes[0].operation)
+        self.assertEqual(errno.EBUSY, probes[1].error_number)
+        self.assertEqual('grab', probes[1].operation)
+        self.assertTrue(busy_device.closed)
 
 
 class DeviceDetectionTests(unittest.TestCase):
@@ -114,6 +199,31 @@ class DeviceDetectionTests(unittest.TestCase):
 
 
 class ListenerTests(unittest.TestCase):
+    def test_grab_conflict_is_logged_and_raised(self):
+        shutdown_event = threading.Event()
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        error = OSError(errno.EBUSY, 'device busy')
+        device.grab = Mock(side_effect=error)
+
+        with (
+            patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+            patch('macropad.interceptor.logger') as logger,
+            self.assertRaises(OSError) as raised,
+        ):
+            interceptor.listen(device.name, Mock(), shutdown_event)
+
+        self.assertIs(error, raised.exception)
+        self.assertTrue(device.closed)
+        logger.error.assert_called_once_with(
+            'input device already exclusively grabbed',
+            extra={
+                'device': device.name,
+                'path': device.path,
+                'error': '[Errno 16] device busy',
+            },
+        )
+
     def test_listener_ticks_handler(self):
         handler = Mock()
         shutdown_event = Mock()

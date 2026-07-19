@@ -48,6 +48,12 @@ uv run macropad validate profile.yml
 uv run macropad validate --directory ./profiles
 ```
 
+Check input permissions, profile access, and the runtime environment:
+
+```bash
+uv run macropad doctor
+```
+
 The module entry point is also available:
 
 ```bash
@@ -219,6 +225,43 @@ profile-file and device counts, and exits with status 0. Missing or invalid file
 `FAIL` sections with multiline source and field-path diagnostics. Files that pass standalone schema
 validation show `PARSED` instead of `PASS` when merged validation cannot complete. Unresolved layers
 and conflicts are attributed to the relevant file; device-wide errors use a `Profile set` section.
+
+## Diagnostics
+
+Run `macropad doctor` before starting the service to check input-device enumeration, open and
+exclusive-grab access, the default profile directory, optional desktop notifications, executable and
+service paths, `PATH`, and graphical-session variables. Each blocking `FAIL` includes remediation.
+Expected grabs held by an active Macropad service are reported as nonblocking `WARN` results;
+optional notification, service, and session-environment gaps are `INFO` results.
+
+The input check briefly grabs and immediately releases each readable event device, closing every
+handle even when a check fails. When the service is active, stop it and rerun doctor only when you
+need to distinguish Macropad's expected grabs from another input grabber:
+
+```bash
+uv run macropad service stop
+uv run macropad doctor
+uv run macropad service start
+```
+
+### Input Permissions
+
+On Debian/Ubuntu, add the current user to the `input` group and then log out and back in:
+
+```bash
+sudo usermod --append --groups input "$USER"
+```
+
+On Fedora, use the same group assignment and start a new login session:
+
+```bash
+sudo usermod --append --groups input "$USER"
+```
+
+Some desktop environments provide device access through per-session ACLs, so group membership is
+not required when `macropad doctor` already reports input access as `PASS`. Membership in the
+`input` group grants access to all input events and can expose every keystroke, including passwords.
+Prefer a device-specific udev rule when broad input access is not acceptable.
 
 ## Service
 

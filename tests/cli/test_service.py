@@ -6,6 +6,37 @@ from macropad.cli import service
 
 
 class ServiceCommandTests(unittest.TestCase):
+    def test_service_info_is_read_from_systemd(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                'ActiveState=active\n'
+                'FragmentPath=/home/demo/.config/systemd/user/macropad.service\n'
+            ),
+        )
+
+        with patch('macropad.cli.service.subprocess.run', return_value=completed) as run_command:
+            service_info = service.get_info()
+
+        self.assertEqual(
+            service.ServiceInfo('/home/demo/.config/systemd/user/macropad.service', True),
+            service_info,
+        )
+        run_command.assert_called_once_with(
+            [
+                'systemctl',
+                '--user',
+                'show',
+                'macropad.service',
+                '--property=FragmentPath',
+                '--property=ActiveState',
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
     def test_systemctl_actions_preserve_exit_status(self):
         for action in service.SYSTEMCTL_ACTIONS:
             with self.subTest(action=action):

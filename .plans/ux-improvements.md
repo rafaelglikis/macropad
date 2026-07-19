@@ -129,7 +129,7 @@ Verification:
 
 ### 4. Add Permission And Environment Diagnostics
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Explain why Macropad cannot see or grab a keyboard before the service is started.
 

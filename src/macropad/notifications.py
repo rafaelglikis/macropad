@@ -7,13 +7,22 @@ DEFAULT_ICON = files('macropad').joinpath('assets/macropad.svg')
 logger = logging.getLogger(__name__)
 
 
-def initialize() -> None:
+def check_availability() -> str | None:
     try:
-        notify2.init('Macropad')
+        initialized = notify2.init('Macropad')
     except Exception as error:
+        return str(error)
+    if initialized is False:
+        return 'notification backend did not initialize'
+    return None
+
+
+def initialize() -> None:
+    error = check_availability()
+    if error is not None:
         logger.warning(
             'notification initialization failed; continuing without notifications',
-            extra={'error': str(error)},
+            extra={'error': error},
         )
 
 
