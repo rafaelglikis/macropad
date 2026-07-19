@@ -587,6 +587,11 @@ pipx uninstall poor-mans-macropad
 `service uninstall` stops and disables the unit, removes it only when its generated marker is
 present, and reloads systemd. It does not remove profiles.
 
+## Changelog
+
+See the [changelog](https://github.com/rafaelglikis/macropad/blob/main/CHANGELOG.md) for released and
+upcoming user-facing changes.
+
 ## Development
 
 Install the base and optional-notification native dependencies listed above before running the full
