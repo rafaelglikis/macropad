@@ -62,20 +62,21 @@ class ProfileReloadTests(unittest.TestCase):
             logger.info.call_args_list,
         )
 
-    def test_failed_reload_reports_candidate_and_changed_paths(self):
+    def test_failed_reload_is_logged_when_notifications_are_disabled(self):
         current_worker = object()
         profile_supervisor = SimpleNamespace(
             workers={'current': current_worker},
             reload=Mock(side_effect=ValueError('invalid binding')),
         )
         args = SimpleNamespace()
+        listen.notifications.configure(False)
+        self.addCleanup(listen.notifications.configure)
 
         with (
             patch(
                 'macropad.cli.listen.profile_files.get_profile_paths',
                 return_value=['/profiles/macros.yml'],
             ),
-            patch('macropad.cli.listen.notifications.send'),
             patch('macropad.cli.listen.logger') as logger,
         ):
             succeeded = listen.reload_profiles(
@@ -205,7 +206,7 @@ class ServiceCommandTests(unittest.TestCase):
             exit_status = cli.main()
 
         self.assertEqual(7, exit_status)
-        run_service.assert_called_once_with('restart', force=False)
+        run_service.assert_called_once_with('restart', force=False, notifications_enabled=True)
 
 
 class GlobalLoggingArgumentTests(unittest.TestCase):
@@ -233,6 +234,26 @@ class GlobalLoggingArgumentTests(unittest.TestCase):
         self.assertTrue(verbose_args.verbose)
         self.assertTrue(debug_args.debug)
         self.assertTrue(action_debug_args.action_debug)
+
+    def test_notifications_can_be_disabled_globally(self):
+        with patch('sys.argv', ['macropad', '--no-notifications', 'monitor']):
+            args = cli.parse_args()
+
+        self.assertTrue(args.no_notifications)
+
+    def test_main_applies_disabled_notification_preference(self):
+        args = SimpleNamespace(subcommand='validate', no_notifications=True)
+
+        with (
+            patch('macropad.cli.parse_args', return_value=args),
+            patch('macropad.cli.configure_logging'),
+            patch('macropad.cli.notifications.configure') as configure_notifications,
+            patch('macropad.cli.validate.run', return_value=0),
+        ):
+            exit_status = cli.main()
+
+        self.assertEqual(0, exit_status)
+        configure_notifications.assert_called_once_with(False)
 
     def test_action_debug_enables_debug_logging(self):
         args = SimpleNamespace(
@@ -368,7 +389,6 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.profile_files.get_profile_paths', return_value=[]),
             patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
@@ -395,7 +415,6 @@ class MainExitStatusTests(unittest.TestCase):
                     'DEFAULT_CONFIG_DIR',
                     default_config_directory,
                 ),
-                patch('macropad.cli.listen.notifications.initialize'),
                 patch('macropad.cli.listen.install_shutdown_handler'),
                 patch('macropad.cli.profile_files.logger'),
                 patch('macropad.cli.listen.logger') as logger,
@@ -422,7 +441,6 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
         ):
@@ -441,7 +459,6 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
             patch('macropad.profile_watcher.PollingObserver') as observer_type,
@@ -462,7 +479,6 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
         ):
@@ -481,7 +497,6 @@ class MainExitStatusTests(unittest.TestCase):
         )
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch(
                 'macropad.cli.listen.profile_files.get_profile_paths',
@@ -509,7 +524,6 @@ class MainExitStatusTests(unittest.TestCase):
         shutdown_requested.wait.return_value = True
 
         with (
-            patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.threading.Event', return_value=shutdown_requested),
             patch('macropad.cli.listen.runtime_status.RuntimeStatusServer'),
@@ -522,6 +536,7 @@ class MainExitStatusTests(unittest.TestCase):
             action_debug=True,
             verbose=False,
             debug=False,
+            notifications_enabled=True,
         )
         supervisor_type.return_value.shutdown.assert_called_once_with()
 

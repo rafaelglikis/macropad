@@ -86,11 +86,10 @@ def run(args: argparse.Namespace) -> int:
         action_debug=getattr(args, 'action_debug', False),
         verbose=getattr(args, 'verbose', False),
         debug=getattr(args, 'debug', False),
+        notifications_enabled=not getattr(args, 'no_notifications', False),
     )
     shutdown_requested = threading.Event()
     install_shutdown_handler(shutdown_requested)
-    notifications.initialize()
-
     try:
         using_default_config = False
         if not args.profile_paths and not args.profile_directories:

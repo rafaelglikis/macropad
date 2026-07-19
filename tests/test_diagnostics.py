@@ -97,6 +97,17 @@ class ProfileDiagnosticTests(unittest.TestCase):
 
 
 class OptionalDiagnosticTests(unittest.TestCase):
+    def test_disabled_notifications_need_no_remediation(self):
+        with patch(
+            'macropad.diagnostics.notifications.check_availability',
+            return_value='disabled by --no-notifications',
+        ):
+            result = diagnostics.check_notifications()
+
+        self.assertEqual(diagnostics.INFO, result.status)
+        self.assertEqual('Desktop notifications are disabled.', result.message)
+        self.assertIsNone(result.remediation)
+
     def test_notification_failure_is_informational(self):
         with patch(
             'macropad.diagnostics.notifications.check_availability',
@@ -106,6 +117,7 @@ class OptionalDiagnosticTests(unittest.TestCase):
 
         self.assertEqual(diagnostics.INFO, result.status)
         self.assertFalse(result.blocking)
+        self.assertIn('poor-mans-macropad[notifications]', result.remediation)
 
     def test_loaded_user_service_reports_fragment_path(self):
         result = diagnostics.check_service(

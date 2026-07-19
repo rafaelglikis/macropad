@@ -8,18 +8,18 @@ Macropad currently supports Linux only. macOS and Windows support are coming soo
 
 ## Install
 
-Install the system dependencies required to build the Python DBus bindings:
+Install the compiler and Python headers required to build the Linux input dependency:
 
 Debian/Ubuntu:
 
 ```bash
-sudo apt install build-essential pkg-config python3-dev libdbus-1-dev libglib2.0-dev
+sudo apt install build-essential python3-dev
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install gcc pkgconf-pkg-config python3-devel dbus-devel glib2-devel
+sudo dnf install gcc python3-devel
 ```
 
 The distribution is named `poor-mans-macropad`; the installed command remains `macropad`. Install it
@@ -48,6 +48,8 @@ pipx ensurepath
 pipx install poor-mans-macropad
 ```
 
+To include desktop notifications, install `poor-mans-macropad[notifications]` instead.
+
 Start a new login shell after the first `pipx ensurepath` if `macropad` is not immediately found.
 
 ### uv
@@ -56,6 +58,40 @@ If `uv` is already installed, its tool interface provides the same isolated inst
 
 ```bash
 uv tool install poor-mans-macropad
+```
+
+To include desktop notifications, install `poor-mans-macropad[notifications]` instead.
+
+### Optional Desktop Notifications
+
+Desktop notifications are optional. The base installation listens for input, reloads profiles, and
+executes actions without importing DBus. To install the notification extra, first install its native
+build dependencies.
+
+Debian/Ubuntu:
+
+```bash
+sudo apt install pkg-config libdbus-1-dev libglib2.0-dev
+```
+
+Fedora:
+
+```bash
+sudo dnf install pkgconf-pkg-config dbus-devel glib2-devel
+```
+
+Then use one of these package specifications with the installer chosen above:
+
+```bash
+pipx install 'poor-mans-macropad[notifications]'
+uv tool install 'poor-mans-macropad[notifications]'
+```
+
+Without the extra, an attempted notification produces one warning and the process continues without
+further attempts. Disable notification attempts explicitly in the foreground with:
+
+```bash
+macropad --no-notifications listen
 ```
 
 Confirm the installed version:
@@ -451,6 +487,12 @@ Install and start the systemd user service:
 macropad service install
 ```
 
+To persistently disable notification attempts in the generated service, install it with:
+
+```bash
+macropad --no-notifications service install
+```
+
 The command writes `$XDG_CONFIG_HOME/systemd/user/macropad.service` when `XDG_CONFIG_HOME` is
 absolute, defaulting to `~/.config/systemd/user/macropad.service`, then reloads systemd and enables
 and starts the unit. The generated unit invokes the `macropad` executable from the active tool
@@ -511,8 +553,9 @@ present, and reloads systemd. It does not remove profiles.
 
 ## Development
 
-Install the native dependencies listed above, then create the project environment. Development uses
-the same service renderer and lifecycle as released installations:
+Install the base and optional-notification native dependencies listed above before running the full
+integration suite, then create the project environment. Development uses the same service renderer
+and lifecycle as released installations:
 
 ```bash
 make

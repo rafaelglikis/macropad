@@ -300,7 +300,7 @@ Verification:
 
 ### 10. Make Notifications Truly Optional
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Avoid requiring DBus development packages for users who do not need desktop notifications.
 

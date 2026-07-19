@@ -197,11 +197,14 @@ def check_notifications() -> DiagnosticResult:
     error = notifications.check_availability()
     if error is None:
         return DiagnosticResult(PASS, 'Notifications', 'Desktop notifications are available.')
+    if error == 'disabled by --no-notifications':
+        return DiagnosticResult(INFO, 'Notifications', 'Desktop notifications are disabled.')
     return DiagnosticResult(
         INFO,
         'Notifications',
         f'Desktop notifications are unavailable: {error}',
-        'This is optional; configure a graphical session and DBus only if notifications are needed.',
+        'This is optional; install poor-mans-macropad[notifications] and configure a graphical '
+        'session and DBus only if notifications are needed.',
     )
 
 

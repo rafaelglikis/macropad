@@ -2,11 +2,11 @@
 
 ## Environment And Commands
 
-- This is a Linux-only Python 3.10+ project using `uv`; native DBus headers are required (`libdbus-1-dev libglib2.0-dev` on Debian/Ubuntu, `dbus-devel glib2-devel` on Fedora).
+- This is a Linux-only Python 3.10+ project using `uv`. The base package has no DBus dependency; the optional `notifications` extra requires native DBus headers (`libdbus-1-dev libglib2.0-dev` on Debian/Ubuntu, `dbus-devel glib2-devel` on Fedora).
 - Create/update the project `.venv` with `make` or `uv sync`. Use `uv sync --frozen` and `uv lock --check` when reproducing CI; run `uv lock` only after dependency metadata changes.
 - Run one test with `uv run python -m unittest tests.test_handlers.KeyboardHandlerLayerTests.test_down_only_binding_repeats_for_key_hold_events`; run a module with `uv run python -m unittest tests.test_handlers`.
 - Before finalizing Python changes, run `make format`, `make lint`, and `make test` in that order. Ruff is pinned in the dev dependency group and enforces 100-column, single-quote formatting plus `E4`, `E7`, `E9`, `F`, `I`, and `B` rules.
-- Integration scripts live under `tests/integration/` and are intentionally excluded from normal `unittest` discovery. Run `make test-wheel` for packaging/assets/metadata/entry points, `make test-service` for headless startup and graceful SIGTERM, and `make test-systemd` for unit rendering. `make test-wheel` creates an isolated environment and may need network access and native build dependencies.
+- Integration scripts live under `tests/integration/` and are intentionally excluded from normal `unittest` discovery. Run `make test-wheel` for base/notification-extra packaging, assets, metadata, and entry points; `make test-service` for headless startup and graceful SIGTERM; and `make test-systemd` for unit rendering. `make test-wheel` creates isolated environments and needs network access plus native DBus headers for the extra-install check.
 - `make build` creates ignored artifacts under `dist/`. Do not edit or commit generated distributions.
 - CI tests Python 3.10 through 3.14, then checks lint, lockfile, wheel installation, service lifecycle, systemd rendering, and distribution artifacts.
 
@@ -28,7 +28,7 @@
 - Device identity is keyboard name only, and all matching event nodes are attached. Structured hardware selectors are deferred.
 - The listener intentionally rescans only after all matching paths are gone. Selector-based monitoring and reacquiring a new path while another matching path remains connected are deferred; do not implement them without a concrete requirement.
 - Actions are trusted shell strings executed detached with `shell=True`; explicit argument-array actions were declined. Preserve the per-worker limit of eight concurrent actions and drop rather than queue actions at the limit.
-- Notification initialization is optional: headless startup must continue when no session bus or notification service exists.
+- Notification dependencies and initialization are optional: headless startup must continue when the extra, session bus, or notification service is absent. Backend import or runtime failure is cached per process to avoid repeated warnings.
 
 ## Service Operations
 

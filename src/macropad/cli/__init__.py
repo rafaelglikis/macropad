@@ -2,7 +2,7 @@ import argparse
 import errno
 import logging
 
-from .. import __version__
+from .. import __version__, notifications
 from ..logging_config import configure_logging
 from . import doctor, init, listen, monitor, service, status, validate
 
@@ -29,6 +29,11 @@ def parse_args() -> argparse.Namespace:
         '--action-debug',
         action='store_true',
         help='Enable debug logs and inherit action stdout/stderr.',
+    )
+    parser.add_argument(
+        '--no-notifications',
+        action='store_true',
+        help='Disable optional desktop notifications.',
     )
     subparsers = parser.add_subparsers(title='Subcommands', dest='subcommand', required=True)
 
@@ -135,6 +140,8 @@ def main() -> int:
         verbose=getattr(args, 'verbose', False),
         debug=getattr(args, 'debug', False) or getattr(args, 'action_debug', False),
     )
+    notifications_enabled = not getattr(args, 'no_notifications', False)
+    notifications.configure(notifications_enabled)
     try:
         if args.subcommand == 'doctor':
             return doctor.run()
@@ -145,7 +152,11 @@ def main() -> int:
         if args.subcommand == 'monitor':
             return monitor.run(args)
         if args.subcommand == 'service':
-            return service.run(args.service_action, force=getattr(args, 'force', False))
+            return service.run(
+                args.service_action,
+                force=getattr(args, 'force', False),
+                notifications_enabled=notifications_enabled,
+            )
         if args.subcommand == 'listen':
             return listen.run(args)
         return validate.run(args)

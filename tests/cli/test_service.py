@@ -91,12 +91,12 @@ class ServiceCommandTests(unittest.TestCase):
             patch('macropad.cli.service._run_systemctl', side_effect=[0, 0, 0]) as run_systemctl,
             redirect_stdout(io.StringIO()),
         ):
-            exit_status = service.run('install', force=True)
+            exit_status = service.run('install', force=True, notifications_enabled=False)
 
         self.assertEqual(0, exit_status)
         install_unit.assert_called_once_with(
             unit_path,
-            service_unit.render_unit(executable),
+            service_unit.render_unit(executable, notifications_enabled=False),
             force=True,
         )
         self.assertEqual(

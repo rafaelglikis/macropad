@@ -29,6 +29,17 @@ class SystemdUnitRendererTests(unittest.TestCase):
 
         self.assertIn(f'Environment=PATH={service_unit.ACTION_PATH}', rendered)
 
+    def test_disabled_notifications_are_persisted_in_service_command(self):
+        rendered = service_unit.render_unit(
+            Path('/opt/macropad/bin/macropad'),
+            notifications_enabled=False,
+        )
+
+        self.assertIn(
+            'ExecStart="/opt/macropad/bin/macropad" --no-notifications --verbose listen --watch',
+            rendered,
+        )
+
 
 class SystemdUnitFileTests(unittest.TestCase):
     def test_absolute_xdg_config_home_resolves_user_unit_path(self):

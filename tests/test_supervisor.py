@@ -136,6 +136,7 @@ class ProfileSupervisorTests(unittest.TestCase):
         self.assertFalse(process.args[2])
         self.assertFalse(process.args[3])
         self.assertFalse(process.args[4])
+        self.assertTrue(process.args[7])
 
     def test_action_debug_is_forwarded_to_worker_process(self):
         profile_supervisor = supervisor.ProfileSupervisor(
@@ -170,6 +171,22 @@ class ProfileSupervisorTests(unittest.TestCase):
         process = profile_supervisor.workers['Macro Keyboard'].process
         self.assertTrue(process.args[3])
         self.assertTrue(process.args[4])
+
+    def test_notification_preference_is_forwarded_to_worker_process(self):
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            notifications_enabled=False,
+            status_queue=queue.Queue(),
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+
+        process = profile_supervisor.workers['Macro Keyboard'].process
+        self.assertFalse(process.args[7])
 
     def test_worker_updates_are_exposed_in_status_snapshot(self):
         status_queue = queue.Queue()
