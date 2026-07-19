@@ -4,6 +4,8 @@
 
 Turn every keyboard into a macropad.
 
+Macropad currently supports Linux only. macOS and Windows support are coming soon.
+
 ## Install
 
 Install the system dependencies required to build the Python DBus bindings:
@@ -11,26 +13,49 @@ Install the system dependencies required to build the Python DBus bindings:
 Debian/Ubuntu:
 
 ```bash
-sudo apt install libdbus-1-dev libglib2.0-dev
+sudo apt install build-essential pkg-config python3-dev libdbus-1-dev libglib2.0-dev
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install dbus-devel glib2-devel
+sudo dnf install gcc pkgconf-pkg-config python3-devel dbus-devel glib2-devel
 ```
 
-Install Macropad as an isolated user command with `uv`:
+The distribution is named `poor-mans-macropad`; the installed command remains `macropad`. Install it
+in an isolated environment with either `pipx` or
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/) rather than modifying the system
+Python.
+
+### pipx
+
+Install `pipx` from the distribution:
+
+```bash
+sudo apt install pipx
+```
+
+On Fedora, use:
+
+```bash
+sudo dnf install pipx
+```
+
+Then ensure its command directory is on `PATH` and install Macropad:
+
+```bash
+pipx ensurepath
+pipx install poor-mans-macropad
+```
+
+Start a new login shell after the first `pipx ensurepath` if `macropad` is not immediately found.
+
+### uv
+
+If `uv` is already installed, its tool interface provides the same isolated installation:
 
 ```bash
 uv tool install poor-mans-macropad
-```
-
-The distribution is named `poor-mans-macropad`; the installed command remains `macropad`. `pipx`
-is also supported:
-
-```bash
-pipx install poor-mans-macropad
 ```
 
 Confirm the installed version:
@@ -38,6 +63,21 @@ Confirm the installed version:
 ```bash
 macropad --version
 ```
+
+### Input Permissions
+
+Run `macropad doctor` first. If it reports input-device permission failures, add the current user to
+the `input` group, then log out and back in:
+
+```bash
+sudo usermod --append --groups input "$USER"
+```
+
+This command applies to Debian, Ubuntu, and Fedora. Some desktop environments already provide access
+through per-session ACLs, so group membership is unnecessary when `macropad doctor` reports input
+access as `PASS`. Membership in the `input` group grants access to all input events and can expose
+every keystroke, including passwords. Prefer a device-specific udev rule when broad input access is
+not acceptable.
 
 ## Usage
 
@@ -80,12 +120,6 @@ List readable input devices and stream key names without grabbing the keyboard:
 ```bash
 macropad monitor
 macropad monitor 'Exact Device Name'
-```
-
-The module entry point is also available:
-
-```bash
-python -m macropad --help
 ```
 
 ## Profile Format
@@ -314,25 +348,6 @@ macropad doctor
 macropad service start
 ```
 
-### Input Permissions
-
-On Debian/Ubuntu, add the current user to the `input` group and then log out and back in:
-
-```bash
-sudo usermod --append --groups input "$USER"
-```
-
-On Fedora, use the same group assignment and start a new login session:
-
-```bash
-sudo usermod --append --groups input "$USER"
-```
-
-Some desktop environments provide device access through per-session ACLs, so group membership is
-not required when `macropad doctor` already reports input access as `PASS`. Membership in the
-`input` group grants access to all input events and can expose every keystroke, including passwords.
-Prefer a device-specific udev rule when broad input access is not acceptable.
-
 ## Device Monitoring
 
 Run `macropad monitor` without arguments to list every readable input device. Devices sharing an
@@ -459,15 +474,24 @@ Macropad directly in the foreground.
 
 ### Upgrade And Uninstall
 
-Upgrade the tool, refresh the generated service path, and restart it:
+Upgrade the tool with the installer that owns it:
 
 ```bash
 uv tool upgrade poor-mans-macropad
+```
+
+or:
+
+```bash
+pipx upgrade poor-mans-macropad
+```
+
+Then refresh the generated service path and restart it:
+
+```bash
 macropad service install
 macropad service restart
 ```
-
-For `pipx`, replace the first command with `pipx upgrade poor-mans-macropad`.
 
 Remove the service before uninstalling the tool:
 
@@ -476,9 +500,14 @@ macropad service uninstall
 uv tool uninstall poor-mans-macropad
 ```
 
+For a `pipx` installation, replace the final command with:
+
+```bash
+pipx uninstall poor-mans-macropad
+```
+
 `service uninstall` stops and disables the unit, removes it only when its generated marker is
-present, and reloads systemd. It does not remove profiles. For a `pipx` installation, use
-`pipx uninstall poor-mans-macropad` as the final command.
+present, and reloads systemd. It does not remove profiles.
 
 ## Development
 
