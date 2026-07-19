@@ -6,16 +6,6 @@ Turn every keyboard into a macropad.
 
 Macropad currently supports Linux only. macOS and Windows support are coming soon.
 
-## Coming Up Next
-
-- **Native Keyboard Shortcuts And Chords:** Emit key presses, shortcuts, and sequences without
-  depending on external tools such as `ydotool` or `xdotool`.
-- **Tray Icon:** Inspect service status, reload profiles, and access common controls from the desktop.
-- **Context-Aware Bindings:** Change bindings based on the current application, window title, or
-  other context.
-- **Windows And macOS Compatibility:** Bring Macropad profiles and workflows to additional desktop
-  platforms.
-
 ## Install
 
 Install the compiler and Python headers required to build the Linux input dependency:
@@ -633,6 +623,16 @@ pipx uninstall poor-mans-macropad
 
 `service uninstall` stops and disables the unit, removes it only when its generated marker is
 present, and reloads systemd. It does not remove profiles.
+
+## Coming Up Next
+
+- **Native Keyboard Shortcuts And Chords:** Emit key presses, shortcuts, and sequences without
+  depending on external tools such as `ydotool` or `xdotool`.
+- **Tray Icon:** Inspect service status, reload profiles, and access common controls from the desktop.
+- **Context-Aware Bindings:** Change bindings based on the current application, window title, or
+  other context.
+- **Windows And macOS Compatibility:** Bring Macropad profiles and workflows to additional desktop
+  platforms.
 
 ## Changelog
 
