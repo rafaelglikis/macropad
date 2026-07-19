@@ -20,7 +20,7 @@ class DeviceAccessProbe:
     error: str | None = None
 
 
-def probe_device_access() -> list[DeviceAccessProbe]:
+def probe_device_access(check_grab: bool = True) -> list[DeviceAccessProbe]:
     try:
         paths = sorted(evdev.list_devices())
     except OSError as error:
@@ -49,6 +49,10 @@ def probe_device_access() -> list[DeviceAccessProbe]:
             continue
 
         try:
+            if not check_grab:
+                probes.append(DeviceAccessProbe(path=path, device_name=device.name))
+                continue
+
             try:
                 device.grab()
             except OSError as error:
@@ -241,6 +245,47 @@ def listen(device_name, handler, shutdown_event):
                     del devices[path]
 
             handler.tick()
+            time.sleep(0.01)
+    finally:
+        for device in devices.values():
+            device.close()
+
+
+def monitor(device_name, event_callback, status_callback, shutdown_event):
+    devices = {}
+    last_scan = 0
+
+    try:
+        while not shutdown_event.is_set():
+            current_time = time.monotonic()
+            if current_time - last_scan >= 0.3:
+                for path in matching_device_paths(device_name):
+                    if path in devices:
+                        continue
+
+                    try:
+                        device = InputDevice(path)
+                    except OSError as error:
+                        if error.errno in DEVICE_GONE_ERRNOS:
+                            continue
+                        _log_device_error(error, 'open', path, device_name)
+                        continue
+                    devices[path] = device
+                    status_callback('connected', path)
+                last_scan = current_time
+
+            for path, device in list(devices.items()):
+                try:
+                    while not shutdown_event.is_set() and (event := device.read_one()):
+                        event_callback(path, event)
+                except OSError as error:
+                    if error.errno not in DEVICE_GONE_ERRNOS:
+                        _log_device_error(error, 'read', path, device_name)
+                        raise
+                    device.close()
+                    del devices[path]
+                    status_callback('disconnected', path)
+
             time.sleep(0.01)
     finally:
         for device in devices.values():

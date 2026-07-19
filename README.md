@@ -54,6 +54,13 @@ Check input permissions, profile access, and the runtime environment:
 uv run macropad doctor
 ```
 
+List readable input devices and stream key names without grabbing the keyboard:
+
+```bash
+uv run macropad monitor
+uv run macropad monitor 'Exact Device Name'
+```
+
 The module entry point is also available:
 
 ```bash
@@ -236,7 +243,8 @@ and conflicts are attributed to the relevant file; device-wide errors use a `Pro
 
 Run `macropad doctor` before starting the service to check input-device enumeration, open and
 exclusive-grab access, the default profile directory, optional desktop notifications, executable and
-service paths, `PATH`, and graphical-session variables. Each blocking `FAIL` includes remediation.
+service paths, current and service action `PATH` values, and graphical-session variables. Each
+blocking `FAIL` includes remediation.
 Expected grabs held by an active Macropad service are reported as nonblocking `WARN` results;
 optional notification, service, and session-environment gaps are `INFO` results.
 
@@ -268,6 +276,27 @@ Some desktop environments provide device access through per-session ACLs, so gro
 not required when `macropad doctor` already reports input access as `PASS`. Membership in the
 `input` group grants access to all input events and can expose every keystroke, including passwords.
 Prefer a device-specific udev rule when broad input access is not acceptable.
+
+## Device Monitoring
+
+Run `macropad monitor` without arguments to list every readable input device. Devices sharing an
+exact evdev name are grouped together and every matching `/dev/input/event*` path is shown; paths
+that cannot be opened include their permission or device error.
+
+Pass an exact listed name to stream key activity:
+
+```text
+CONNECTED    /dev/input/event12
+down         KEY_A                    /dev/input/event12
+repeat       KEY_A                    /dev/input/event12
+up           KEY_A                    /dev/input/event12
+```
+
+Monitoring never exclusively grabs a device, so normal keyboard input continues. It opens every
+current path with the selected name, reports disconnects, reacquires matching paths after reconnect,
+and exits cleanly with Ctrl+C or SIGTERM. An active Macropad worker already holds its configured
+device exclusively; if monitor connects but shows no events, run `macropad service stop` before
+monitoring and start the service again afterward.
 
 ## Service
 

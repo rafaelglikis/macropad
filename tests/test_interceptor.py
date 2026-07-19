@@ -1,6 +1,7 @@
 import errno
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from macropad import interceptor
@@ -110,6 +111,20 @@ class DeviceMatchingTests(unittest.TestCase):
 
 
 class DeviceAccessProbeTests(unittest.TestCase):
+    def test_probe_can_inspect_device_without_grabbing(self):
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+        ):
+            probes = interceptor.probe_device_access(check_grab=False)
+
+        self.assertEqual([interceptor.DeviceAccessProbe(device.path, device.name)], probes)
+        self.assertFalse(device.grabbed)
+        self.assertFalse(device.ungrabbed)
+        self.assertTrue(device.closed)
+
     def test_probe_grabs_ungrabs_and_closes_accessible_device(self):
         device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
 
@@ -196,6 +211,83 @@ class DeviceDetectionTests(unittest.TestCase):
         self.assertEqual('Macro Keyboard', device_name)
         self.assertTrue(inactive_device.closed)
         self.assertTrue(selected_device.closed)
+
+
+class DeviceMonitorTests(unittest.TestCase):
+    def test_monitor_reads_events_without_grabbing_device(self):
+        shutdown_event = threading.Event()
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        event = SimpleNamespace(type=1, code=30, value=1)
+        device.read_one = Mock(return_value=event)
+        event_callback = Mock(side_effect=lambda path, input_event: shutdown_event.set())
+        status_callback = Mock()
+        clock = Mock()
+        clock.monotonic.return_value = 1.0
+
+        with (
+            patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+            patch('macropad.interceptor.time', clock),
+        ):
+            interceptor.monitor(
+                device.name,
+                event_callback,
+                status_callback,
+                shutdown_event,
+            )
+
+        status_callback.assert_called_once_with('connected', device.path)
+        event_callback.assert_called_once_with(device.path, event)
+        self.assertFalse(device.grabbed)
+        self.assertTrue(device.closed)
+
+    def test_monitor_reports_disconnect_and_reconnect(self):
+        shutdown_event = threading.Event()
+        first_device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        replacement_device = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
+        first_device.read_one = Mock(side_effect=OSError(errno.ENODEV, 'device lost'))
+        replacement_device.read_one = Mock(return_value=None)
+        devices = {
+            first_device.path: first_device,
+            replacement_device.path: replacement_device,
+        }
+        status_updates = []
+
+        def update_status(status, path):
+            status_updates.append((status, path))
+            if status == 'connected' and path == replacement_device.path:
+                shutdown_event.set()
+
+        clock = Mock()
+        clock.monotonic.side_effect = [1.0, 1.4]
+
+        with (
+            patch(
+                'macropad.interceptor.matching_device_paths',
+                side_effect=[[first_device.path], [replacement_device.path]],
+            ),
+            patch('macropad.interceptor.InputDevice', side_effect=devices.get),
+            patch('macropad.interceptor.time', clock),
+        ):
+            interceptor.monitor(
+                first_device.name,
+                Mock(),
+                update_status,
+                shutdown_event,
+            )
+
+        self.assertEqual(
+            [
+                ('connected', first_device.path),
+                ('disconnected', first_device.path),
+                ('connected', replacement_device.path),
+            ],
+            status_updates,
+        )
+        self.assertFalse(first_device.grabbed)
+        self.assertFalse(replacement_device.grabbed)
+        self.assertTrue(first_device.closed)
+        self.assertTrue(replacement_device.closed)
 
 
 class ListenerTests(unittest.TestCase):

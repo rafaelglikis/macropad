@@ -9,28 +9,29 @@ dependency direction, process lifecycle, or the profile and event flows change.
 
 ## Module Map
 
-| Module              | Responsibility                                                                                                                         |
-|---------------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
-| `cli/__init__.py`   | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
-| `cli/listen.py`     | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                  |
-| `cli/doctor.py`     | Renders read-only environment diagnostics and returns status based on blocking results.                                               |
-| `cli/validate.py`   | Resolves validation inputs and delegates the standalone validation workflow.                                                          |
-| `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                           |
-| `cli/service.py`    | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                |
-| `profile_watcher.py` | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                   |
-| `diagnostics.py`    | Classifies input access, profiles, notifications, installation paths, and environment checks.                                         |
-| `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
-| `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
-| `profiles.py`       | Loads strict YAML and validates, normalizes, groups, and merges profile configurations.                                               |
-| `supervisor.py`     | Reconciles desired profiles with worker slots, owns child processes, applies restart backoff, and enforces bounded shutdown.           |
-| `worker.py`         | Defines the child-process entry point, installs the worker signal handler, constructs the keyboard handler, and owns handler shutdown. |
-| `interceptor.py`    | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler.        |
-| `handlers.py`       | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions.                            |
-| `actions.py`        | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit.                                      |
-| `notifications.py`  | Initializes optional desktop notifications and sends notifications without making them a runtime requirement.                          |
-| `logging_config.py` | Configures structured console logging and renders known context fields consistently.                                                   |
-| `assets/`           | Contains package resources, currently the desktop notification icon.                                                                   |
+| Module                 | Responsibility                                                                                                                         |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `__main__.py`          | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
+| `cli/__init__.py`      | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
+| `cli/listen.py`        | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                    |
+| `cli/doctor.py`        | Renders read-only environment diagnostics and returns status based on blocking results.                                                |
+| `cli/monitor.py`       | Lists readable devices and renders non-grabbing key-event streams.                                                                     |
+| `cli/validate.py`      | Resolves validation inputs and delegates the standalone validation workflow.                                                           |
+| `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                               |
+| `cli/service.py`       | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                  |
+| `profile_watcher.py`   | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                     |
+| `diagnostics.py`       | Classifies input access, profiles, notifications, installation paths, and environment checks.                                          |
+| `validation.py`        | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
+| `config.py`            | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
+| `profiles.py`          | Loads strict YAML and validates, normalizes, groups, and merges profile configurations.                                                |
+| `supervisor.py`        | Reconciles desired profiles with worker slots, owns child processes, applies restart backoff, and enforces bounded shutdown.           |
+| `worker.py`            | Defines the child-process entry point, installs the worker signal handler, constructs the keyboard handler, and owns handler shutdown. |
+| `interceptor.py`       | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler.        |
+| `handlers.py`          | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions.                            |
+| `actions.py`           | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit.                                      |
+| `notifications.py`     | Initializes optional desktop notifications and sends notifications without making them a runtime requirement.                          |
+| `logging_config.py`    | Configures structured console logging and renders known context fields consistently.                                                   |
+| `assets/`              | Contains package resources, currently the desktop notification icon.                                                                   |
 
 ## Dependency Diagram
 
@@ -39,6 +40,7 @@ flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli/__init__.py]
     CLI --> Listen[cli/listen.py]
     CLI --> Doctor[cli/doctor.py]
+    CLI --> Monitor[cli/monitor.py]
     CLI --> ValidateCommand[cli/validate.py]
     CLI --> Service[cli/service.py]
 
@@ -52,6 +54,8 @@ flowchart TD
     Doctor --> Service
     Diagnostics --> Interceptor[interceptor.py]
     Diagnostics --> Notifications
+
+    Monitor --> Interceptor
 
     ValidateCommand --> ProfileFiles
     ValidateCommand --> Validation[validation.py]
@@ -188,6 +192,13 @@ permission failures are logged distinctly before a worker exits or continues sca
 An `EBUSY` probe is a nonblocking warning when the Macropad user service is active and a blocking
 failure otherwise; stopping the service and rerunning the check disambiguates ownership.
 
+`interceptor.monitor()` opens every current path matching an exact device name without calling
+`grab()`. It rescans while other paths remain connected, reports each connection and disconnection,
+and reacquires matching paths after reconnect. This monitoring behavior is independent from the
+listener's intentional policy of rescanning only after all matching paths are gone.
+The command reports when the Macropad service is active because its configured devices are already
+exclusively grabbed and cannot deliver events to the non-grabbing monitor until the service stops.
+
 The internal `detect()` helper snapshots existing paths, waits for a new path even when another
 device disappears at the same time, and returns the new keyboard's name after observing a pressed
 key. Probe handles are always closed before it returns. It is retained for the planned guided
@@ -274,6 +285,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add systemd lifecycle or journal command behavior in `cli/service.py`.
 - Add diagnostic checks and remediation in `diagnostics.py`, keeping command rendering in
   `cli/doctor.py` and operating-system resource handling in the owning adapter.
+- Add device and key presentation in `cli/monitor.py`, keeping evdev resources and reconnect behavior
+  in `interceptor.py`.
 - Add argument parsing and dispatch in `cli/__init__.py`, and command-specific orchestration in a
   focused module under `cli/`.
 - Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in

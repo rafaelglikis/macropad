@@ -6,7 +6,7 @@ import logging
 import argcomplete
 
 from ..logging_config import configure_logging
-from . import doctor, listen, service, validate
+from . import doctor, listen, monitor, service, validate
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,16 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser(
         'doctor',
         help='Check input permissions and runtime environment',
+    )
+
+    monitor_subparser = subparsers.add_parser(
+        'monitor',
+        help='List input devices or stream key events without grabbing',
+    )
+    monitor_subparser.add_argument(
+        'device',
+        nargs='?',
+        help='Exact input device name to monitor. Omit to list readable devices.',
     )
 
     listen_subparser = subparsers.add_parser('listen', help='Intercept profile device')
@@ -85,6 +95,8 @@ def main() -> int:
         args = parse_args()
         if args.subcommand == 'doctor':
             return doctor.run()
+        if args.subcommand == 'monitor':
+            return monitor.run(args)
         if args.subcommand == 'service':
             return service.run(args.service_action)
         if args.subcommand == 'listen':

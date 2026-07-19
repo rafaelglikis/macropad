@@ -60,6 +60,7 @@ class DoctorCommandTests(unittest.TestCase):
             '/units/macropad.service',
             True,
             None,
+            None,
         )
         self.assertEqual(
             'FAIL Input devices: Permission denied.\n'

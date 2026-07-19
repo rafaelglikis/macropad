@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 from dataclasses import dataclass
 
@@ -21,6 +22,7 @@ class ServiceInfo:
     fragment_path: str | None
     active: bool
     error: str | None = None
+    action_path: str | None = None
 
 
 def get_info() -> ServiceInfo:
@@ -31,6 +33,7 @@ def get_info() -> ServiceInfo:
         SERVICE_NAME,
         '--property=FragmentPath',
         '--property=ActiveState',
+        '--property=Environment',
     ]
     try:
         completed = subprocess.run(
@@ -56,7 +59,23 @@ def get_info() -> ServiceInfo:
             properties[name] = value
     fragment_path = properties.get('FragmentPath')
     if completed.returncode == 0 and fragment_path:
-        return ServiceInfo(fragment_path, properties.get('ActiveState') == 'active')
+        try:
+            environment = shlex.split(properties.get('Environment', ''))
+        except ValueError:
+            environment = []
+        action_path = next(
+            (
+                assignment.removeprefix('PATH=')
+                for assignment in environment
+                if assignment.startswith('PATH=')
+            ),
+            None,
+        )
+        return ServiceInfo(
+            fragment_path,
+            properties.get('ActiveState') == 'active',
+            action_path=action_path,
+        )
     return ServiceInfo(
         None,
         False,

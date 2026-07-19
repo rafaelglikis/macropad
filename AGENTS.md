@@ -16,6 +16,7 @@
 - Keep `cli/__init__.py` limited to argument parsing, command dispatch, and global error handling. Put command workflows in focused modules under `cli/`, and keep reusable state machines, operating-system adapters, and report rendering outside the command package.
 - `cli/service.py` owns the service command actions and non-shelling invocations of `systemctl --user` and `journalctl --user`.
 - `diagnostics.py` classifies read-only environment checks; `cli/doctor.py` renders them and determines command status. Keep evdev handle probing in `interceptor.py` and systemd probing in `cli/service.py`.
+- `cli/monitor.py` renders device listings and key events; keep non-grabbing evdev enumeration, handle lifecycle, and reconnect behavior in `interceptor.py`.
 - `ProfileSupervisor` validates and merges the complete candidate configuration before reconciliation, then owns one worker slot per keyboard name, process lifecycle, per-device retry backoff, and bounded graceful shutdown.
 - Each child enters through `worker.run`, constructs its own `KeyboardHandler`, then runs `interceptor.listen` to grab every current `/dev/input/event*` node whose keyboard name matches the profile. Keep delayed key/layer transitions monotonic and threadless; tests use fake clocks rather than sleeps.
 - Profiles are strict version `1` YAML. Fragments with the same device name merge before worker startup; duplicate keys, unknown fields/events/key names, and conflicts must retain source/path diagnostics.

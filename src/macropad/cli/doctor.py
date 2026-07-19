@@ -9,6 +9,7 @@ def run() -> int:
         service_info.fragment_path,
         service_info.active,
         service_info.error,
+        service_info.action_path,
     )
     for result in results:
         print(f'{result.status} {result.name}: {result.message}')

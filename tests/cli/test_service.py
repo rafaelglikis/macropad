@@ -12,6 +12,7 @@ class ServiceCommandTests(unittest.TestCase):
             stdout=(
                 'ActiveState=active\n'
                 'FragmentPath=/home/demo/.config/systemd/user/macropad.service\n'
+                'Environment=PYTHONUNBUFFERED=1 PATH=/home/demo/bin:/usr/bin\n'
             ),
         )
 
@@ -19,7 +20,11 @@ class ServiceCommandTests(unittest.TestCase):
             service_info = service.get_info()
 
         self.assertEqual(
-            service.ServiceInfo('/home/demo/.config/systemd/user/macropad.service', True),
+            service.ServiceInfo(
+                '/home/demo/.config/systemd/user/macropad.service',
+                True,
+                action_path='/home/demo/bin:/usr/bin',
+            ),
             service_info,
         )
         run_command.assert_called_once_with(
@@ -30,6 +35,7 @@ class ServiceCommandTests(unittest.TestCase):
                 'macropad.service',
                 '--property=FragmentPath',
                 '--property=ActiveState',
+                '--property=Environment',
             ],
             check=False,
             capture_output=True,

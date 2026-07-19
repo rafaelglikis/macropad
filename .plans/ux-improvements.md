@@ -159,7 +159,7 @@ Verification:
 
 ### 5. Add Safe Device And Key Monitoring
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Let users identify device names and `KEY_*` codes without disabling their keyboard.
 

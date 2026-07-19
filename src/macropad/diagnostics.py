@@ -233,12 +233,25 @@ def check_service(
     )
 
 
-def check_environment(environ: Mapping[str, str]) -> list[DiagnosticResult]:
+def check_environment(
+    environ: Mapping[str, str],
+    service_action_path: str | None,
+) -> list[DiagnosticResult]:
     path = environ.get('PATH')
     path_result = DiagnosticResult(
         PASS if path else INFO,
-        'Action PATH',
-        f'PATH={path}' if path else 'PATH is unset; profile actions may not resolve commands.',
+        'Current PATH',
+        f'PATH={path}' if path else 'PATH is unset for the current process.',
+    )
+    service_path_result = DiagnosticResult(
+        PASS if service_action_path else INFO,
+        'Service action PATH',
+        f'PATH={service_action_path}'
+        if service_action_path
+        else 'The service action PATH is unavailable.',
+        None
+        if service_action_path
+        else 'Install the user service to inspect the environment inherited by service actions.',
     )
     session_variables = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS')
     session_state = ', '.join(
@@ -257,7 +270,7 @@ def check_environment(environ: Mapping[str, str]) -> list[DiagnosticResult]:
         else 'Unset session variables affect desktop notifications and graphical actions, not '
         'input listening.',
     )
-    return [path_result, session_result]
+    return [path_result, service_path_result, session_result]
 
 
 def run_checks(
@@ -265,6 +278,7 @@ def run_checks(
     service_path: str | None,
     service_active: bool,
     service_error: str | None,
+    service_action_path: str | None,
 ) -> list[DiagnosticResult]:
     return [
         *check_input_devices(service_active),
@@ -272,5 +286,5 @@ def run_checks(
         check_notifications(),
         check_executable(),
         check_service(service_path, service_active, service_error),
-        *check_environment(os.environ),
+        *check_environment(os.environ, service_action_path),
     ]

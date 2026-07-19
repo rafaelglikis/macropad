@@ -59,6 +59,7 @@ def main() -> None:
                 'macropad/cli/__init__.py',
                 'macropad/cli/doctor.py',
                 'macropad/cli/listen.py',
+                'macropad/cli/monitor.py',
                 'macropad/cli/profile_files.py',
                 'macropad/cli/service.py',
                 'macropad/cli/validate.py',

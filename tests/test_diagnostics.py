@@ -119,12 +119,13 @@ class OptionalDiagnosticTests(unittest.TestCase):
         self.assertIn('(active)', result.message)
 
     def test_unset_session_environment_is_informational(self):
-        results = diagnostics.check_environment({})
+        results = diagnostics.check_environment({}, None)
 
         self.assertEqual(
-            [diagnostics.INFO, diagnostics.INFO], [result.status for result in results]
+            [diagnostics.INFO, diagnostics.INFO, diagnostics.INFO],
+            [result.status for result in results],
         )
-        self.assertIn('DISPLAY=unset', results[1].message)
+        self.assertIn('DISPLAY=unset', results[2].message)
 
     def test_graphical_session_environment_passes(self):
         results = diagnostics.check_environment(
@@ -132,13 +133,16 @@ class OptionalDiagnosticTests(unittest.TestCase):
                 'PATH': '/usr/bin',
                 'WAYLAND_DISPLAY': 'wayland-0',
                 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus',
-            }
+            },
+            '/home/demo/bin:/usr/bin',
         )
 
         self.assertEqual(
-            [diagnostics.PASS, diagnostics.PASS], [result.status for result in results]
+            [diagnostics.PASS, diagnostics.PASS, diagnostics.PASS],
+            [result.status for result in results],
         )
-        self.assertIsNone(results[1].remediation)
+        self.assertIn('/home/demo/bin:/usr/bin', results[1].message)
+        self.assertIsNone(results[2].remediation)
 
 
 if __name__ == '__main__':
