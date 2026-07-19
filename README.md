@@ -203,9 +203,9 @@ no stdin, and has stdout and stderr discarded. Actions are detached and continue
 reloads or worker shutdown.
 
 Each keyboard worker tracks at most eight concurrent actions. Additional actions are dropped rather
-than queued until an earlier action exits. Use absolute paths or ensure commands are available in the
-service `PATH`; a command that works in an interactive terminal may not have the same environment in
-the systemd user service.
+than queued until an earlier action exits. The systemd user service includes `~/bin`, `~/.local/bin`,
+and standard system command directories in its deterministic `PATH`. Use absolute paths or a service
+override for commands installed in other interactive-shell or tool-manager directories.
 
 ### Validation
 

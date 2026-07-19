@@ -135,6 +135,10 @@ Actions are trusted shell strings. Each worker may have at most eight active act
 actions are dropped rather than queued. Action processes are detached and are not terminated when a
 worker reloads or stops.
 
+The checked-in systemd user unit gives actions a deterministic `PATH` containing `~/bin`,
+`~/.local/bin`, and standard system command directories. It intentionally does not start Macropad
+through a login shell.
+
 ## Device Lifecycle
 
 `matching_device_paths()` enumerates evdev paths, opens each path long enough to inspect its name, and

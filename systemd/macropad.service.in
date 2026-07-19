@@ -6,6 +6,7 @@ After=default.target
 Type=simple
 WorkingDirectory=@WORKING_DIRECTORY@
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 ExecStart=@EXECUTABLE@ listen --watch
 KillMode=mixed
 TimeoutStopSec=10
