@@ -6,7 +6,7 @@ import logging
 import argcomplete
 
 from ..logging_config import configure_logging
-from . import doctor, init, listen, monitor, service, validate
+from . import doctor, init, listen, monitor, service, status, validate
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser(
         'doctor',
         help='Check input permissions and runtime environment',
+    )
+
+    subparsers.add_parser(
+        'status',
+        help='Show live keyboard worker and device state',
     )
 
     init_subparser = subparsers.add_parser(
@@ -127,6 +132,8 @@ def main() -> int:
             return doctor.run()
         if args.subcommand == 'init':
             return init.run(args)
+        if args.subcommand == 'status':
+            return status.run()
         if args.subcommand == 'monitor':
             return monitor.run(args)
         if args.subcommand == 'service':

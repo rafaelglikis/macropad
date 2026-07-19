@@ -17,10 +17,12 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `cli/doctor.py`        | Renders read-only environment diagnostics and returns status based on blocking results.                                                |
 | `cli/init.py`          | Orchestrates guided input checks, device/key capture, collision-safe fragment creation, and generated-profile validation.              |
 | `cli/monitor.py`       | Lists readable devices and renders non-grabbing key-event streams.                                                                     |
+| `cli/status.py`        | Queries and renders live parent, worker, device, retry, and configuration state.                                                       |
 | `cli/validate.py`      | Resolves validation inputs and delegates the standalone validation workflow.                                                           |
 | `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                               |
 | `cli/service.py`       | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                  |
 | `profile_watcher.py`   | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                     |
+| `runtime_status.py`    | Owns the secured local Unix status endpoint, client transport, and runtime path resolution.                                            |
 | `diagnostics.py`       | Classifies input access, profiles, notifications, installation paths, and environment checks.                                          |
 | `validation.py`        | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
 | `config.py`            | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
@@ -43,6 +45,7 @@ flowchart TD
     CLI --> Doctor[cli/doctor.py]
     CLI --> Init[cli/init.py]
     CLI --> Monitor[cli/monitor.py]
+    CLI --> Status[cli/status.py]
     CLI --> ValidateCommand[cli/validate.py]
     CLI --> Service[cli/service.py]
 
@@ -50,6 +53,7 @@ flowchart TD
     Listen --> ProfileWatcher[profile_watcher.py]
     Listen --> Supervisor[supervisor.py]
     Listen --> Notifications[notifications.py]
+    Listen --> RuntimeStatus[runtime_status.py]
 
     Doctor --> Diagnostics[diagnostics.py]
     Doctor --> ProfileFiles
@@ -65,6 +69,8 @@ flowchart TD
     Init --> Service
 
     Monitor --> Interceptor
+    Status --> RuntimeStatus
+    Status --> Service
 
     ValidateCommand --> ProfileFiles
     ValidateCommand --> Validation[validation.py]
@@ -83,6 +89,8 @@ flowchart TD
     Worker --> Handler[handlers.py]
     Worker --> Interceptor
     Worker --> Actions
+    Worker --> StatusQueue[worker status queue]
+    Supervisor --> StatusQueue
 
     Handler --> Config
     Handler --> Actions[actions.py]
@@ -113,7 +121,8 @@ The CLI runs in the parent process. `ProfileSupervisor` maintains one worker slo
 keyboard name. Each slot has its own `multiprocessing.Process`, shutdown event, restart counters, and
 retry deadline.
 
-Only immutable `ProfileConfig` data and logging option booleans cross the process boundary. The
+Only immutable `ProfileConfig` data, logging option booleans, a worker generation ID, and the shared
+status queue cross the process boundary. The
 parent does not construct a `KeyboardHandler` or `ActionExecutor`. The child enters through
 `worker.run()`, configures its own logging so non-fork start methods behave consistently, installs its
 SIGTERM handler, constructs the executor and handler, and then enters the interception loop. This
@@ -139,6 +148,8 @@ current `/dev/input/event*` nodes with that name.
    `interceptor.listen()`.
 8. The interceptor waits for matching devices, opens and grabs every matching event node, and begins
    forwarding input events.
+9. The worker publishes deduplicated state transitions to the parent, which serves snapshots through
+   the local runtime status socket.
 
 `cli.profile_files` resolves the default directory from an absolute `XDG_CONFIG_HOME`, falling back
 to `~/.config` when it is unset or invalid. If a custom XDG profile directory is absent but the
@@ -240,6 +251,39 @@ listener's intentional policy of rescanning only after all matching paths are go
 The command reports when the Macropad service is active because its configured devices are already
 exclusively grabbed and cannot deliver events to the non-grabbing monitor until the service stops.
 
+`interceptor.listen()` reports `opening` before attempting handles, `listening` only after successful
+grabs, `waiting` after all grabbed paths disappear, and path-specific input errors. `worker.run()`
+adds initial `waiting`, fatal `error`, and cooperative `shutting_down` transitions. Each message
+contains the worker generation ID so updates from a replaced process cannot overwrite its successor.
+
+## Runtime Status Flow
+
+The parent owns the only external endpoint. Workers cannot accept status clients and status clients
+cannot mutate daemon state.
+
+```mermaid
+sequenceDiagram
+    participant Worker
+    participant Queue as Multiprocessing status queue
+    participant Parent as ProfileSupervisor
+    participant Socket as Local Unix socket
+    participant Client as macropad status
+
+    Worker->>Queue: waiting/opening/listening/error update
+    Parent->>Queue: Drain generation-tagged updates
+    Parent->>Parent: Merge process, retry, profile, and reload state
+    Parent->>Socket: Publish immutable snapshot before blocking transitions
+    Client->>Socket: Connect read-only
+    Socket-->>Client: Parent and worker status
+```
+
+The socket lives under `$XDG_RUNTIME_DIR/macropad/status.sock`, falling back to a user-specific
+temporary directory. Runtime directories are verified as user-owned and forced to mode `0700`; the
+socket and lifetime lock use mode `0600`. The lock serializes listener startup, stale and owned socket
+cleanup compares device/inode identity, and a regular file is never removed as a stale socket. A
+small read-only server thread keeps the latest parent-published snapshot available while the parent
+waits for workers to stop. Closing the parent removes only the socket inode it created.
+
 The internal `detect()` helper snapshots existing paths, waits for a new path even when another
 device disappears at the same time, and returns the new keyboard's name, event path, and first
 pressed `KEY_*` name. One monotonic deadline bounds both reconnect and key capture. `capture_key()`
@@ -323,6 +367,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add keyboard event semantics in `handlers.py` and use fake monotonic clocks in tests.
 - Add evdev discovery or handle behavior in `interceptor.py` without moving process policy there.
 - Add worker process setup or cleanup in `worker.py`.
+- Add live worker state transitions in `worker.py` and `interceptor.py`, parent snapshots in
+  `supervisor.py`, and local transport behavior in `runtime_status.py`.
 - Add reconciliation, restart, or bounded-shutdown policy in `supervisor.py`.
 - Add Watchdog event handling, observer lifecycle, or reload debounce behavior in
   `profile_watcher.py`.

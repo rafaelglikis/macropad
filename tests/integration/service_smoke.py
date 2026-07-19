@@ -52,6 +52,25 @@ def wait_for_message(
     raise RuntimeError(description)
 
 
+def wait_for_runtime_state(command: list[str], environment: dict[str, str], state: str) -> None:
+    deadline = time.monotonic() + 10
+    last_output = ''
+    while time.monotonic() < deadline:
+        status = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        last_output = status.stdout + status.stderr
+        if status.returncode == 0 and f'state: {state}' in status.stdout:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f'runtime status did not reach {state!r}:\n{last_output}')
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix='macropad-service-') as temp_dir:
         temp_path = Path(temp_dir)
@@ -62,6 +81,7 @@ def main() -> None:
 
         environment = os.environ.copy()
         environment['HOME'] = str(temp_path / 'home')
+        environment['XDG_RUNTIME_DIR'] = str(temp_path / 'runtime')
         environment.pop('DBUS_SESSION_BUS_ADDRESS', None)
         environment.pop('DISPLAY', None)
         environment.pop('WAYLAND_DISPLAY', None)
@@ -97,6 +117,12 @@ def main() -> None:
                 output,
                 STARTUP_MESSAGE,
                 'service did not become ready before timeout',
+            )
+
+            wait_for_runtime_state(
+                [str(PROJECT_ROOT / '.venv/bin/macropad'), 'status'],
+                environment,
+                'waiting',
             )
 
             replacement_path = profile_directory / '.ci.yml.tmp'

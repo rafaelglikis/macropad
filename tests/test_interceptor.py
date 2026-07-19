@@ -2,7 +2,7 @@ import errno
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from macropad import interceptor
 
@@ -93,6 +93,22 @@ class DeviceMatchingTests(unittest.TestCase):
                 'error': '[Errno 13] permission denied',
             },
         )
+
+    def test_permission_failure_is_available_to_runtime_status(self):
+        error = OSError(errno.EACCES, 'permission denied')
+        error_callback = Mock()
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=['/dev/input/event1']),
+            patch('macropad.interceptor.InputDevice', side_effect=error),
+        ):
+            matching_paths = interceptor.matching_device_paths(
+                'Macro Keyboard',
+                error_callback,
+            )
+
+        self.assertEqual([], matching_paths)
+        error_callback.assert_called_once_with('/dev/input/event1', error)
 
     def test_successful_open_allows_a_later_failure_to_be_reported(self):
         error = OSError(errno.EACCES, 'permission denied')
@@ -329,11 +345,34 @@ class DeviceMonitorTests(unittest.TestCase):
 
 
 class ListenerTests(unittest.TestCase):
+    def test_scan_permission_failure_reports_error_instead_of_waiting(self):
+        shutdown_event = threading.Event()
+        status_callback = Mock()
+        error = OSError(errno.EACCES, 'permission denied')
+
+        def scan(device_name, error_callback):
+            error_callback('/dev/input/event1', error)
+            shutdown_event.set()
+            return []
+
+        with (
+            patch('macropad.interceptor.matching_device_paths', side_effect=scan),
+            patch('macropad.interceptor.time.sleep'),
+        ):
+            interceptor.listen('Macro Keyboard', Mock(), shutdown_event, status_callback)
+
+        status_callback.assert_called_once_with(
+            'error',
+            ('/dev/input/event1',),
+            str(error),
+        )
+
     def test_grab_conflict_is_logged_and_raised(self):
         shutdown_event = threading.Event()
         device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
         error = OSError(errno.EBUSY, 'device busy')
         device.grab = Mock(side_effect=error)
+        status_callback = Mock()
 
         with (
             patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
@@ -341,7 +380,7 @@ class ListenerTests(unittest.TestCase):
             patch('macropad.interceptor.logger') as logger,
             self.assertRaises(OSError) as raised,
         ):
-            interceptor.listen(device.name, Mock(), shutdown_event)
+            interceptor.listen(device.name, Mock(), shutdown_event, status_callback)
 
         self.assertIs(error, raised.exception)
         self.assertTrue(device.closed)
@@ -352,6 +391,13 @@ class ListenerTests(unittest.TestCase):
                 'path': device.path,
                 'error': '[Errno 16] device busy',
             },
+        )
+        self.assertEqual(
+            [
+                call('opening', (device.path,), None),
+                call('error', (device.path,), str(error)),
+            ],
+            status_callback.call_args_list,
         )
 
     def test_listener_ticks_handler(self):
@@ -372,6 +418,7 @@ class ListenerTests(unittest.TestCase):
         shutdown_event = threading.Event()
         device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
         handler = Mock()
+        status_callback = Mock()
 
         with (
             patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
@@ -380,10 +427,17 @@ class ListenerTests(unittest.TestCase):
                 'macropad.interceptor.time.sleep', side_effect=lambda seconds: shutdown_event.set()
             ),
         ):
-            interceptor.listen('Macro Keyboard', handler, shutdown_event)
+            interceptor.listen('Macro Keyboard', handler, shutdown_event, status_callback)
 
         self.assertTrue(device.grabbed)
         self.assertTrue(device.closed)
+        self.assertEqual(
+            [
+                call('opening', (device.path,), None),
+                call('listening', (device.path,), None),
+            ],
+            status_callback.call_args_list,
+        )
 
     def test_partial_disconnect_closes_lost_device_and_keeps_other_device(self):
         shutdown_event = threading.Event()

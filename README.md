@@ -56,6 +56,12 @@ Check input permissions, profile access, and the runtime environment:
 uv run macropad doctor
 ```
 
+Inspect live keyboard worker and device state:
+
+```bash
+uv run macropad status
+```
+
 Create a first profile through guided device and key detection:
 
 ```bash
@@ -377,6 +383,43 @@ On success, `init` reports the exact path and refreshes the systemd service stat
 cannot prove which arguments a customized service uses, so automatic loading is confirmed only as a
 condition of the standard `listen --watch` command and default profile directory. If the service is
 inactive, start in the foreground with `macropad listen` or use the service command shown by `init`.
+
+## Runtime Status
+
+`macropad status` reports whether each configured keyboard worker is actually waiting, opening event
+paths, listening after a successful exclusive grab, backing off after failure, reporting an input
+error, or shutting down. It includes the parent and worker PIDs, profile fragment paths, currently
+grabbed event paths, failure reason, and retry delay where available:
+
+```text
+Macropad parent PID: 1234
+
+Macro Keyboard
+  state: listening
+  pid: 1235
+  profiles: /home/user/.config/macropad/profiles/macro.yml
+  paths: /dev/input/event12
+
+Media Pad
+  state: backing_off (retry in 4.0s)
+  profiles: /home/user/.config/macropad/profiles/media.yml
+  error: process 1236 exited
+```
+
+An invalid watched profile candidate is shown separately while the last valid workers keep running.
+Permission and grab errors include the affected event path when known. `listening` is reported only
+after the worker successfully grabs at least one matching path; a visible device before child startup
+does not count as listening.
+
+The command connects to a read-only Unix socket owned by the listening parent under
+`$XDG_RUNTIME_DIR/macropad/`, with a user-specific directory under the system temporary directory as
+a fallback. The directory and socket are user-only, stale sockets are removed safely, and no remote
+control operations are exposed. If no parent is reachable, the command reports whether the systemd
+service is active and points to the appropriate next command.
+
+`macropad status` and `macropad service status` answer different questions: the former reports live
+Macropad worker/device readiness, while the latter remains a direct proxy for systemd unit state and
+logs.
 
 ## Service
 

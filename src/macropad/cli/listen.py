@@ -6,7 +6,7 @@ import signal
 import threading
 import time
 
-from .. import notifications, profile_watcher
+from .. import notifications, profile_watcher, runtime_status
 from ..supervisor import ProfileSupervisor
 from . import profile_files
 
@@ -24,6 +24,7 @@ def reload_profiles(
     try:
         profile_supervisor.reload(profile_paths)
     except Exception as error:
+        profile_supervisor.configuration_error = str(error)
         logger.error(
             'profile reload failed',
             extra={
@@ -38,6 +39,7 @@ def reload_profiles(
         )
         return False
 
+    profile_supervisor.configuration_error = None
     worker_count = len(profile_supervisor.workers)
     logger.info(
         'profiles reloaded',
@@ -55,6 +57,7 @@ def run_supervision_cycle(
     args: argparse.Namespace,
     reload_requests: queue.SimpleQueue,
     reload_scheduler: profile_watcher.ProfileReloadScheduler,
+    status_server=None,
 ) -> None:
     now = time.monotonic()
     reload_scheduler.add_changes(profile_watcher.drain_reload_requests(reload_requests), now)
@@ -63,6 +66,8 @@ def run_supervision_cycle(
         logger.info('profile changes detected', extra={'changed_paths': tuple(changed_paths)})
         reload_profiles(profile_supervisor, args, changed_paths)
     profile_supervisor.tick()
+    if status_server is not None:
+        status_server.poll(profile_supervisor.status_snapshot())
 
 
 def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
@@ -74,6 +79,7 @@ def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
 
 def run(args: argparse.Namespace) -> int:
     observer = None
+    status_server = None
     reload_requests = queue.SimpleQueue()
     reload_scheduler = profile_watcher.ProfileReloadScheduler()
     profile_supervisor = ProfileSupervisor(
@@ -122,6 +128,16 @@ def run(args: argparse.Namespace) -> int:
                 return 1
 
         try:
+            status_server = runtime_status.RuntimeStatusServer()
+            profile_supervisor.status_publisher = status_server.publish
+        except Exception as error:
+            logger.error(
+                'failed to start runtime status endpoint',
+                extra={'error': str(error)},
+            )
+            return 1
+
+        try:
             profile_supervisor.start(all_profile_paths)
         except Exception as error:
             logger.error(
@@ -150,10 +166,15 @@ def run(args: argparse.Namespace) -> int:
                     args,
                     reload_requests,
                     reload_scheduler,
+                    status_server,
                 )
         except KeyboardInterrupt:
             pass
         return 0
     finally:
         profile_watcher.stop_profile_observer(observer)
-        profile_supervisor.shutdown()
+        try:
+            profile_supervisor.shutdown()
+        finally:
+            if status_server is not None:
+                status_server.close()

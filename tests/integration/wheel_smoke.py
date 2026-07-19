@@ -63,8 +63,10 @@ def main() -> None:
                 'macropad/cli/monitor.py',
                 'macropad/cli/profile_files.py',
                 'macropad/cli/service.py',
+                'macropad/cli/status.py',
                 'macropad/cli/validate.py',
                 'macropad/diagnostics.py',
+                'macropad/runtime_status.py',
             }
             missing_members = required_members - members
             if missing_members:

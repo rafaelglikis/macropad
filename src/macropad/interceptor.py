@@ -129,7 +129,7 @@ def _clear_device_error(operation: str, path: str) -> None:
     _reported_device_errors.difference_update(resolved_errors)
 
 
-def matching_device_paths(device_name: str) -> list[str]:
+def matching_device_paths(device_name: str, error_callback=None) -> list[str]:
     matching_paths = []
 
     for path in evdev.list_devices():
@@ -143,6 +143,8 @@ def matching_device_paths(device_name: str) -> list[str]:
                 )
                 continue
             _log_device_error(error, 'open', path)
+            if error_callback is not None:
+                error_callback(path, error)
             continue
 
         _clear_device_error('open', path)
@@ -274,15 +276,31 @@ def capture_key(device_name: str, timeout: float = 60.0) -> DetectedInput:
     return DetectedInput(device.name, _key_name(key_code), device.path)
 
 
-def listen(device_name, handler, shutdown_event):
+def listen(device_name, handler, shutdown_event, status_callback=None):
     devices = {}
     last_scan = 0
+
+    def report(state: str, paths=(), error: str | None = None) -> None:
+        if status_callback is not None:
+            status_callback(state, tuple(sorted(paths)), error)
 
     try:
         while not shutdown_event.is_set():
             current_time = time.monotonic()
             if not devices and current_time - last_scan >= 0.3:
-                for path in matching_device_paths(device_name):
+                scan_failed = False
+
+                def report_scan_error(path: str, error: OSError) -> None:
+                    nonlocal scan_failed
+                    scan_failed = True
+                    report('error', (path,), str(error))
+
+                matching_paths = matching_device_paths(device_name, report_scan_error)
+                if matching_paths:
+                    report('opening', matching_paths)
+                elif not scan_failed:
+                    report('waiting')
+                for path in matching_paths:
                     if path in devices:
                         continue
 
@@ -296,6 +314,7 @@ def listen(device_name, handler, shutdown_event):
                             device.close()
                         if error.errno not in DEVICE_GONE_ERRNOS:
                             _log_device_error(error, 'grab', path, device_name)
+                            report('error', (path,), str(error))
                             raise
                         logger.info(
                             'input device disappeared before grab',
@@ -304,6 +323,8 @@ def listen(device_name, handler, shutdown_event):
                         continue
                     _clear_device_error('grab', path)
                     devices[path] = device
+                if devices:
+                    report('listening', devices)
                 last_scan = current_time
 
             for path, device in list(devices.items()):
@@ -320,6 +341,7 @@ def listen(device_name, handler, shutdown_event):
                     )
                     device.close()
                     del devices[path]
+                    report('listening' if devices else 'waiting', devices)
 
             handler.tick()
             time.sleep(0.01)

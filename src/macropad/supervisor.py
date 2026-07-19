@@ -1,5 +1,7 @@
 import logging
 import multiprocessing
+import os
+import queue
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +26,10 @@ class Worker:
     failure_count: int = 0
     retry_at: float | None = None
     started_at: float | None = None
+    runtime_id: int = 0
+    state: str = 'starting'
+    matched_paths: tuple[str, ...] = ()
+    error: str | None = None
 
     @property
     def device_name(self) -> str:
@@ -44,6 +50,8 @@ class ProfileSupervisor:
         action_debug=False,
         verbose=False,
         debug=False,
+        status_queue=None,
+        status_publisher=None,
     ):
         self._process_factory = process_factory or multiprocessing.Process
         self._device_present = device_present or interceptor.has_device
@@ -52,6 +60,11 @@ class ProfileSupervisor:
         self.action_debug = action_debug
         self.verbose = verbose
         self.debug = debug
+        self._owns_status_queue = status_queue is None
+        self._status_queue = status_queue if status_queue is not None else multiprocessing.Queue()
+        self._next_runtime_id = 1
+        self.configuration_error = None
+        self.status_publisher = status_publisher
         self.workers: dict[str, Worker] = {}
 
     def start(self, profile_paths: list[str]) -> None:
@@ -85,7 +98,7 @@ class ProfileSupervisor:
                 self._stop_workers([current_worker])
                 self.workers.pop(device_name)
 
-            worker = Worker(prepared_profile, self._shutdown_event_factory())
+            worker = self._new_worker(prepared_profile)
             self.workers[device_name] = worker
             try:
                 self._launch_worker(worker)
@@ -100,6 +113,7 @@ class ProfileSupervisor:
             ][1]
 
     def tick(self) -> None:
+        self._drain_status_updates()
         now = self._clock()
         for worker in list(self.workers.values()):
             process = worker.process
@@ -119,9 +133,12 @@ class ProfileSupervisor:
 
             if process is not None:
                 process.join(timeout=5)
+                self._drain_status_updates()
+                reason = worker.error or f'process {process.pid} exited'
+                error_paths = worker.matched_paths if worker.error else ()
                 worker.process = None
                 worker.started_at = None
-                self._schedule_restart(worker, now, f'process {process.pid} exited')
+                self._schedule_restart(worker, now, reason, error_paths)
                 continue
 
             if worker.retry_at is None:
@@ -134,27 +151,38 @@ class ProfileSupervisor:
                 self._launch_worker(worker)
             except Exception as error:
                 self._schedule_restart(worker, now, str(error))
+        self._drain_status_updates()
 
     def shutdown(self) -> None:
         workers = list(self.workers.values())
         self._stop_workers(workers)
+        self._drain_status_updates()
         self.workers.clear()
+        if self._owns_status_queue:
+            self._status_queue.close()
+            self._status_queue.join_thread()
 
     def _start_prepared_profiles(self, prepared_profiles: list[PreparedProfile]) -> None:
         started_workers = {}
         try:
             for prepared_profile in prepared_profiles:
-                worker = Worker(prepared_profile, self._shutdown_event_factory())
+                worker = self._new_worker(prepared_profile)
                 self._launch_worker(worker)
                 started_workers[worker.device_name] = worker
         except Exception:
             self._stop_workers(started_workers.values())
             raise
         self.workers = started_workers
+        self._publish_status()
 
     def _launch_worker(self, worker: Worker) -> None:
         prepared_profile = worker.prepared_profile
         worker.shutdown_event.clear()
+        worker.runtime_id = self._next_runtime_id
+        self._next_runtime_id += 1
+        worker.state = 'starting'
+        worker.matched_paths = ()
+        worker.error = None
         process = self._process_factory(
             target=worker_runtime.run,
             args=(
@@ -163,6 +191,8 @@ class ProfileSupervisor:
                 self.action_debug,
                 self.verbose,
                 self.debug,
+                self._status_queue,
+                worker.runtime_id,
             ),
         )
         started = False
@@ -191,7 +221,7 @@ class ProfileSupervisor:
             raise
 
     @staticmethod
-    def _schedule_restart(worker: Worker, now: float, reason: str) -> None:
+    def _schedule_restart(worker: Worker, now: float, reason: str, paths=()) -> None:
         worker.failure_count += 1
         delay = RESTART_INITIAL_DELAY_SECONDS
         for _ in range(worker.failure_count - 1):
@@ -200,6 +230,9 @@ class ProfileSupervisor:
                 break
         worker.retry_at = now + delay
         worker.started_at = None
+        worker.state = 'backing_off'
+        worker.matched_paths = tuple(paths)
+        worker.error = reason
         logger.warning(
             'worker failed; restart scheduled',
             extra={
@@ -209,11 +242,12 @@ class ProfileSupervisor:
             },
         )
 
-    @staticmethod
-    def _stop_workers(workers) -> None:
+    def _stop_workers(self, workers) -> None:
         workers = list(workers)
         for worker in workers:
+            worker.state = 'shutting_down'
             worker.shutdown_event.set()
+        self._publish_status()
 
         processes = [worker.process for worker in workers if worker.process is not None]
         deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
@@ -234,3 +268,54 @@ class ProfileSupervisor:
         if surviving_processes:
             pids = ', '.join(str(process.pid) for process in surviving_processes)
             raise RuntimeError(f'Worker process(es) did not stop: {pids}')
+
+    def _new_worker(self, prepared_profile: PreparedProfile) -> Worker:
+        return Worker(prepared_profile, self._shutdown_event_factory())
+
+    def _drain_status_updates(self) -> None:
+        workers_by_id = {worker.runtime_id: worker for worker in self.workers.values()}
+        while True:
+            try:
+                update = self._status_queue.get_nowait()
+            except queue.Empty:
+                return
+            worker = workers_by_id.get(update.get('worker_id'))
+            if (
+                worker is None
+                or worker.process is None
+                or worker.device_name != update.get('device')
+            ):
+                continue
+            worker.state = update['state']
+            worker.matched_paths = tuple(update.get('paths', ()))
+            worker.error = update.get('error')
+
+    def status_snapshot(self, drain_updates: bool = True) -> dict:
+        if drain_updates:
+            self._drain_status_updates()
+        now = self._clock()
+        workers = []
+        for worker in sorted(self.workers.values(), key=lambda item: item.device_name):
+            retry_seconds = None
+            if worker.retry_at is not None:
+                retry_seconds = max(0.0, worker.retry_at - now)
+            workers.append(
+                {
+                    'device': worker.device_name,
+                    'profiles': list(worker.prepared_profile.paths),
+                    'state': worker.state,
+                    'pid': worker.process.pid if worker.process is not None else None,
+                    'paths': list(worker.matched_paths),
+                    'error': worker.error,
+                    'retry_seconds': retry_seconds,
+                }
+            )
+        return {
+            'pid': os.getpid(),
+            'configuration_error': self.configuration_error,
+            'workers': workers,
+        }
+
+    def _publish_status(self) -> None:
+        if self.status_publisher is not None:
+            self.status_publisher(self.status_snapshot(drain_updates=False))

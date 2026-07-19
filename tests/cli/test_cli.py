@@ -37,6 +37,7 @@ class ProfileReloadTests(unittest.TestCase):
             )
 
         self.assertTrue(succeeded)
+        self.assertIsNone(profile_supervisor.configuration_error)
         profile_supervisor.reload.assert_called_once_with(['/profiles/macros.yml'])
         send_notification.assert_called_once_with(
             title='Macropad Configuration Updated',
@@ -82,6 +83,7 @@ class ProfileReloadTests(unittest.TestCase):
             )
 
         self.assertFalse(succeeded)
+        self.assertEqual('invalid binding', profile_supervisor.configuration_error)
         self.assertIs(current_worker, profile_supervisor.workers['current'])
         logger.error.assert_called_once_with(
             'profile reload failed',
@@ -240,6 +242,24 @@ class SupervisionCycleTests(unittest.TestCase):
         )
 
         profile_supervisor.tick.assert_called_once_with()
+
+    def test_supervision_cycle_serves_current_runtime_status(self):
+        snapshot = {'pid': 123, 'workers': []}
+        profile_supervisor = SimpleNamespace(
+            tick=Mock(),
+            status_snapshot=Mock(return_value=snapshot),
+        )
+        status_server = Mock()
+
+        listen.run_supervision_cycle(
+            profile_supervisor,
+            SimpleNamespace(),
+            queue.SimpleQueue(),
+            profile_watcher.ProfileReloadScheduler(),
+            status_server,
+        )
+
+        status_server.poll.assert_called_once_with(snapshot)
 
     def test_reload_runs_once_after_all_changes_are_quiet(self):
         profile_supervisor = SimpleNamespace(tick=Mock())
@@ -470,6 +490,7 @@ class MainExitStatusTests(unittest.TestCase):
             patch('macropad.cli.listen.notifications.initialize'),
             patch('macropad.cli.listen.install_shutdown_handler'),
             patch('macropad.cli.listen.threading.Event', return_value=shutdown_requested),
+            patch('macropad.cli.listen.runtime_status.RuntimeStatusServer'),
             patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
         ):
             exit_status = listen.run(args)

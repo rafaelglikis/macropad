@@ -1,7 +1,8 @@
 import multiprocessing
+import queue
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from macropad import supervisor
 
@@ -117,6 +118,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             device_present=lambda device_name: False,
             clock=clock,
             shutdown_event_factory=FakeEvent,
+            status_queue=queue.Queue(),
         )
 
     def test_workers_are_owned_by_device_name(self):
@@ -141,6 +143,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             device_present=lambda device_name: False,
             shutdown_event_factory=FakeEvent,
             action_debug=True,
+            status_queue=queue.Queue(),
         )
         prepared_profile = self._prepared_profile()
 
@@ -157,6 +160,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             shutdown_event_factory=FakeEvent,
             verbose=True,
             debug=True,
+            status_queue=queue.Queue(),
         )
         prepared_profile = self._prepared_profile()
 
@@ -166,6 +170,157 @@ class ProfileSupervisorTests(unittest.TestCase):
         process = profile_supervisor.workers['Macro Keyboard'].process
         self.assertTrue(process.args[3])
         self.assertTrue(process.args[4])
+
+    def test_worker_updates_are_exposed_in_status_snapshot(self):
+        status_queue = queue.Queue()
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            status_queue=status_queue,
+        )
+        prepared_profile = self._prepared_profile(path='/profiles/macro.yml')
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macro.yml'])
+        worker = profile_supervisor.workers['Macro Keyboard']
+        status_queue.put(
+            {
+                'worker_id': worker.runtime_id,
+                'device': worker.device_name,
+                'state': 'listening',
+                'paths': ('/dev/input/event12',),
+                'error': None,
+            }
+        )
+
+        snapshot = profile_supervisor.status_snapshot()
+
+        self.assertEqual('listening', snapshot['workers'][0]['state'])
+        self.assertEqual(['/dev/input/event12'], snapshot['workers'][0]['paths'])
+        self.assertEqual(['/profiles/macro.yml'], snapshot['workers'][0]['profiles'])
+
+    def test_stale_worker_update_does_not_replace_current_state(self):
+        status_queue = queue.Queue()
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            status_queue=status_queue,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        worker = profile_supervisor.workers['Macro Keyboard']
+        status_queue.put(
+            {
+                'worker_id': worker.runtime_id - 1,
+                'device': worker.device_name,
+                'state': 'error',
+                'paths': (),
+                'error': 'stale failure',
+            }
+        )
+
+        snapshot = profile_supervisor.status_snapshot()
+
+        self.assertEqual('starting', snapshot['workers'][0]['state'])
+        self.assertIsNone(snapshot['workers'][0]['error'])
+
+    def test_restart_uses_new_generation_and_ignores_old_process_update(self):
+        clock = FakeClock()
+        status_queue = queue.Queue()
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            clock=clock,
+            shutdown_event_factory=FakeEvent,
+            status_queue=status_queue,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        worker = profile_supervisor.workers['Macro Keyboard']
+        old_runtime_id = worker.runtime_id
+        worker.process.alive = False
+        profile_supervisor.tick()
+        clock.advance(1)
+        profile_supervisor.tick()
+        self.assertNotEqual(old_runtime_id, worker.runtime_id)
+
+        status_queue.put(
+            {
+                'worker_id': old_runtime_id,
+                'device': worker.device_name,
+                'state': 'error',
+                'paths': ('/dev/input/event1',),
+                'error': 'old process failure',
+            }
+        )
+
+        snapshot = profile_supervisor.status_snapshot()
+
+        self.assertEqual('starting', snapshot['workers'][0]['state'])
+        self.assertIsNone(snapshot['workers'][0]['error'])
+
+    def test_worker_error_and_path_are_preserved_during_backoff(self):
+        clock = FakeClock()
+        status_queue = queue.Queue()
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            clock=clock,
+            shutdown_event_factory=FakeEvent,
+            status_queue=status_queue,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        worker = profile_supervisor.workers['Macro Keyboard']
+        status_queue.put(
+            {
+                'worker_id': worker.runtime_id,
+                'device': worker.device_name,
+                'state': 'error',
+                'paths': ('/dev/input/event12',),
+                'error': '[Errno 16] device busy',
+            }
+        )
+        worker.process.alive = False
+
+        profile_supervisor.tick()
+        snapshot = profile_supervisor.status_snapshot()
+
+        self.assertEqual('backing_off', snapshot['workers'][0]['state'])
+        self.assertEqual('[Errno 16] device busy', snapshot['workers'][0]['error'])
+        self.assertEqual(['/dev/input/event12'], snapshot['workers'][0]['paths'])
+
+    def test_shutdown_state_is_published_before_waiting_for_workers(self):
+        status_publisher = Mock()
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            status_queue=queue.Queue(),
+            status_publisher=status_publisher,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+        status_publisher.reset_mock()
+
+        profile_supervisor.shutdown()
+
+        published_states = [
+            worker['state']
+            for published in status_publisher.call_args_list
+            for worker in published.args[0]['workers']
+        ]
+        self.assertIn('shutting_down', published_states)
 
     def test_invalid_candidate_keeps_current_worker_running(self):
         profile_supervisor = self._create_supervisor()
@@ -320,6 +475,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             device_present=lambda device_name: False,
             clock=clock,
             shutdown_event_factory=FakeEvent,
+            status_queue=queue.Queue(),
         )
         current_profile = self._prepared_profile()
         broken_profile = self._prepared_profile('Broken Keyboard')
@@ -395,6 +551,7 @@ class ProfileSupervisorTests(unittest.TestCase):
             process_factory=process_factory,
             device_present=lambda device_name: False,
             clock=clock,
+            status_queue=queue.Queue(),
         )
         prepared_profile = self._prepared_profile()
 
@@ -428,6 +585,7 @@ class ProfileSupervisorTests(unittest.TestCase):
         profile_supervisor = supervisor.ProfileSupervisor(
             process_factory=process_factory,
             device_present=lambda device_name: False,
+            status_queue=queue.Queue(),
         )
         prepared_profile = self._prepared_profile()
 

@@ -1,3 +1,4 @@
+import queue
 import signal
 import threading
 import unittest
@@ -69,6 +70,67 @@ class WorkerTests(unittest.TestCase):
             worker.run(profile_config, Mock())
 
         handler.shutdown.assert_called_once_with()
+
+    def test_worker_reports_waiting_opening_and_listening_states(self):
+        profile_config = SimpleNamespace(device='Macro Keyboard', keyboard=object())
+        shutdown_event = Mock()
+        shutdown_event.is_set.return_value = False
+        status_queue = queue.Queue()
+
+        def listen(device_name, handler, event, status_callback):
+            status_callback('opening', ('/dev/input/event12',), None)
+            status_callback('listening', ('/dev/input/event12',), None)
+
+        with (
+            patch('macropad.worker.configure_logging'),
+            patch('macropad.worker.install_shutdown_handler'),
+            patch('macropad.worker.ActionExecutor'),
+            patch('macropad.worker.KeyboardHandler') as handler_type,
+            patch('macropad.worker.interceptor.listen', side_effect=listen),
+        ):
+            worker.run(
+                profile_config,
+                shutdown_event,
+                status_queue=status_queue,
+                worker_id=7,
+            )
+
+        updates = [status_queue.get_nowait() for _ in range(3)]
+        self.assertEqual(
+            ['waiting', 'opening', 'listening'], [update['state'] for update in updates]
+        )
+        self.assertTrue(all(update['worker_id'] == 7 for update in updates))
+        handler_type.return_value.shutdown.assert_called_once_with()
+
+    def test_worker_preserves_path_from_fatal_interceptor_error(self):
+        profile_config = SimpleNamespace(device='Macro Keyboard', keyboard=object())
+        shutdown_event = Mock()
+        shutdown_event.is_set.return_value = False
+        status_queue = queue.Queue()
+        error = OSError(16, 'device busy')
+
+        def listen(device_name, handler, event, status_callback):
+            status_callback('error', ('/dev/input/event12',), str(error))
+            raise error
+
+        with (
+            patch('macropad.worker.configure_logging'),
+            patch('macropad.worker.install_shutdown_handler'),
+            patch('macropad.worker.ActionExecutor'),
+            patch('macropad.worker.KeyboardHandler'),
+            patch('macropad.worker.interceptor.listen', side_effect=listen),
+            self.assertRaises(OSError),
+        ):
+            worker.run(
+                profile_config,
+                shutdown_event,
+                status_queue=status_queue,
+                worker_id=8,
+            )
+
+        updates = [status_queue.get_nowait() for _ in range(2)]
+        self.assertEqual('error', updates[-1]['state'])
+        self.assertEqual(('/dev/input/event12',), updates[-1]['paths'])
 
 
 if __name__ == '__main__':
