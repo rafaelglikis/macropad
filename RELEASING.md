@@ -40,7 +40,10 @@ git switch -c "release/${VERSION}"
 uv version "${VERSION}"
 ```
 
-3. Add any version-specific documentation or release notes needed beyond GitHub's generated notes.
+3. Update `CHANGELOG.md`. Move the relevant entries from `Unreleased` under a heading formatted as
+   `## [<version>] - YYYY-MM-DD`, leave a fresh empty `Unreleased` section, and update the comparison
+   links at the bottom of the file. Include only user-facing changes and verify the release heading
+   matches `project.version`.
 
 4. Run the complete local release checks in this order:
 
@@ -66,7 +69,7 @@ uv run python -m macropad --version
 6. Commit and push the release branch, then open a pull request into `main`:
 
 ```bash
-git add pyproject.toml uv.lock
+git add pyproject.toml uv.lock CHANGELOG.md
 git commit -m "Prepare version ${VERSION}"
 git push -u origin "release/${VERSION}"
 gh pr create --base main --fill
