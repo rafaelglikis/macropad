@@ -54,6 +54,12 @@ Check input permissions, profile access, and the runtime environment:
 uv run macropad doctor
 ```
 
+Create a first profile through guided device and key detection:
+
+```bash
+uv run macropad init
+```
+
 List readable input devices and stream key names without grabbing the keyboard:
 
 ```bash
@@ -298,6 +304,43 @@ and exits cleanly with Ctrl+C or SIGTERM. An active Macropad worker already hold
 device exclusively; if monitor connects but shows no events, run `macropad service stop` before
 monitoring and start the service again afterward.
 
+## Guided Initialization
+
+Run `macropad init` to create one working release binding without manually discovering evdev names
+or writing YAML. The command first runs the blocking input-device checks from `macropad doctor`, then
+asks you to disconnect the target keyboard. Detection starts only after you confirm that it is
+disconnected: reconnect it and press the key you want to configure. By default, each device or key
+capture times out after 60 seconds; use `--timeout SECONDS` to choose another positive timeout.
+
+The command asks for a trusted shell command and writes a new fragment under the resolved default
+profile directory. Generated macros run when the captured key is released. The directory follows the
+same XDG and legacy fallback rules as `listen` and `validate`.
+
+If the detected device already has profiles, `init` lists every existing fragment and asks whether to
+add a new one. It never edits those files. If the captured key already has an `up` action, release the
+key and capture another one or cancel. Other events on that key can safely merge with the generated
+release binding.
+
+Filenames are derived from the device and key, for example
+`macro_keyboard_key_a.yml`. Existing filenames are preserved and a numeric suffix is selected. The
+new fragment is conflict-checked against the complete existing profile set before creation, opened
+exclusively, and validated with the normal complete on-disk validation workflow before success is
+reported. Cancellation, timeout, write failure, or validation failure removes the new file without
+touching existing fragments.
+
+An active Macropad service may already own a configured keyboard and prevent non-grabbing key
+capture. If initialization times out for an existing device, stop the service and retry:
+
+```bash
+macropad service stop
+macropad init
+```
+
+On success, `init` reports the exact path and refreshes the systemd service state. Active state alone
+cannot prove which arguments a customized service uses, so automatic loading is confirmed only as a
+condition of the standard `listen --watch` command and default profile directory. If the service is
+inactive, start in the foreground with `macropad listen` or use the service command shown by `init`.
+
 ## Service
 
 Install and start the systemd user service:
@@ -328,6 +371,7 @@ Macropad directly in the foreground.
 
 ```bash
 make test
+make test-init
 make test-wheel
 make test-service
 make test-systemd

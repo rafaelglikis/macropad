@@ -182,9 +182,12 @@ class DeviceDetectionTests(unittest.TestCase):
             ),
             patch('macropad.interceptor.InputDevice', return_value=device),
         ):
-            device_name = interceptor.detect()
+            detected = interceptor.detect()
 
-        self.assertEqual('Macro Keyboard', device_name)
+        self.assertEqual(
+            interceptor.DetectedInput('Macro Keyboard', 'KEY_A', '/dev/input/event2'),
+            detected,
+        )
         self.assertTrue(device.closed)
 
     def test_detect_closes_candidates_without_pressed_keys(self):
@@ -206,11 +209,46 @@ class DeviceDetectionTests(unittest.TestCase):
             ),
             patch('macropad.interceptor.InputDevice', side_effect=devices.get),
         ):
-            device_name = interceptor.detect()
+            detected = interceptor.detect()
 
-        self.assertEqual('Macro Keyboard', device_name)
+        self.assertEqual(
+            interceptor.DetectedInput('Macro Keyboard', 'KEY_A', '/dev/input/event3'),
+            detected,
+        )
         self.assertTrue(inactive_device.closed)
         self.assertTrue(selected_device.closed)
+
+    def test_detect_times_out_under_one_monotonic_deadline(self):
+        now = [0.0]
+        clock = Mock()
+        clock.monotonic.side_effect = lambda: now[0]
+        clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
+
+        with (
+            patch('macropad.interceptor.evdev.list_devices', return_value=['/dev/input/event1']),
+            patch('macropad.interceptor.time', clock),
+            self.assertRaisesRegex(TimeoutError, 'within 1 seconds'),
+        ):
+            interceptor.detect(timeout=1)
+
+    def test_capture_key_waits_for_release_before_accepting_another_press(self):
+        device = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
+        event = SimpleNamespace(type=1, code=48, value=1)
+        device.active_keys = Mock(side_effect=[(30,), (), ()])
+        device.read_one = Mock(side_effect=[None, None, event])
+
+        with (
+            patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+            patch('macropad.interceptor.time.sleep'),
+        ):
+            detected = interceptor.capture_key(device.name, timeout=1)
+
+        self.assertEqual(
+            interceptor.DetectedInput('Macro Keyboard', 'KEY_B', '/dev/input/event2'),
+            detected,
+        )
+        self.assertTrue(device.closed)
 
 
 class DeviceMonitorTests(unittest.TestCase):

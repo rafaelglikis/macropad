@@ -71,6 +71,9 @@ jobs:
       - name: Check lint and formatting
         run: make lint
 
+      - name: Verify guided initialization
+        run: make test-init
+
       - name: Verify wheel installation
         run: uv run --frozen python tests/integration/wheel_smoke.py
 

@@ -185,7 +185,7 @@ Verification:
 
 ### 6. Provide A Guided Initialization Flow
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Take a new user from installation to one working macro with no unexplained manual steps.
 

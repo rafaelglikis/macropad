@@ -1,4 +1,4 @@
-.PHONY: install install-editable sync test test-wheel test-service test-systemd lint format build render-systemd systemd
+.PHONY: install install-editable sync test test-init test-wheel test-service test-systemd lint format build render-systemd systemd
 
 SYSTEMD_USER_DIR := $(HOME)/.config/systemd/user
 SERVICE_FILE := $(SYSTEMD_USER_DIR)/macropad.service
@@ -21,6 +21,9 @@ sync:
 
 test:
 	uv run python -m unittest discover -v
+
+test-init:
+	uv run python tests/integration/init_smoke.py
 
 test-wheel:
 	uv run python tests/integration/wheel_smoke.py

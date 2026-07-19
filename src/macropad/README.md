@@ -15,6 +15,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `cli/__init__.py`      | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
 | `cli/listen.py`        | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                    |
 | `cli/doctor.py`        | Renders read-only environment diagnostics and returns status based on blocking results.                                                |
+| `cli/init.py`          | Orchestrates guided input checks, device/key capture, collision-safe fragment creation, and generated-profile validation.              |
 | `cli/monitor.py`       | Lists readable devices and renders non-grabbing key-event streams.                                                                     |
 | `cli/validate.py`      | Resolves validation inputs and delegates the standalone validation workflow.                                                           |
 | `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                               |
@@ -40,6 +41,7 @@ flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli/__init__.py]
     CLI --> Listen[cli/listen.py]
     CLI --> Doctor[cli/doctor.py]
+    CLI --> Init[cli/init.py]
     CLI --> Monitor[cli/monitor.py]
     CLI --> ValidateCommand[cli/validate.py]
     CLI --> Service[cli/service.py]
@@ -54,6 +56,13 @@ flowchart TD
     Doctor --> Service
     Diagnostics --> Interceptor[interceptor.py]
     Diagnostics --> Notifications
+
+    Init --> Diagnostics
+    Init --> Interceptor
+    Init --> ProfileFiles
+    Init --> Profiles
+    Init --> Validation
+    Init --> Service
 
     Monitor --> Interceptor
 
@@ -113,8 +122,8 @@ current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` configures logging, parses arguments, and dispatches to `cli.doctor.run()`,
-   `cli.listen.run()`, `cli.validate.run()`, or `cli.service.run()`.
+1. `cli.main()` configures logging, parses arguments, and dispatches to the focused `doctor`, `init`,
+   `listen`, `monitor`, `validate`, or `service` command module.
 2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
 3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
    directories.
@@ -139,6 +148,25 @@ The validation command module delegates to `validation.run()`, which uses the sa
 validation, grouping, and merge path as worker startup, but never initializes notifications,
 constructs a supervisor, or opens an input device. Semantic checks that depend on the complete device
 configuration, including layer references, run after fragments for that device are merged.
+
+## Guided Initialization Flow
+
+`cli.init` is interactive orchestration over existing adapters and profile APIs; it does not own
+evdev handles or duplicate profile merge rules.
+
+1. Read systemd service state and render the blocking input checks from `diagnostics.py`.
+2. Ask the user to disconnect the target, then call the non-grabbing `interceptor.detect()` under a
+   monotonic timeout while the user reconnects it and presses a key.
+3. Load and merge current default-directory profiles. For an already-profiled device, list its
+   fragment paths and require confirmation before proposing another fragment.
+4. If that key's release event is already bound, call `interceptor.capture_key()` to wait for release
+   and capture a different key from the same device.
+5. Validate the proposed fragment together with all loaded profiles in memory.
+6. Select a slug-based filename with a numeric collision suffix, create it exclusively, and run the
+   normal complete validation workflow against the on-disk directory.
+7. Remove only the generated file on cancellation or any write or validation failure. On success,
+   report the exact path, refresh service state, qualify watch behavior when effective arguments are
+   unknown, and show the next foreground or service command.
 
 ## Input And Action Flow
 
@@ -200,9 +228,12 @@ The command reports when the Macropad service is active because its configured d
 exclusively grabbed and cannot deliver events to the non-grabbing monitor until the service stops.
 
 The internal `detect()` helper snapshots existing paths, waits for a new path even when another
-device disappears at the same time, and returns the new keyboard's name after observing a pressed
-key. Probe handles are always closed before it returns. It is retained for the planned guided
-initialization flow rather than exposed as a standalone command.
+device disappears at the same time, and returns the new keyboard's name, event path, and first
+pressed `KEY_*` name. One monotonic deadline bounds both reconnect and key capture. `capture_key()`
+uses the same non-grabbing handle lifecycle for another key on a known device, but waits for held keys
+to be released before accepting another press. Probe handles are always closed before either helper
+returns or times out. These helpers are used by guided initialization rather than exposed as
+standalone commands.
 
 ## Profile Reload Flow
 
@@ -283,6 +314,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add Watchdog event handling, observer lifecycle, or reload debounce behavior in
   `profile_watcher.py`.
 - Add systemd lifecycle or journal command behavior in `cli/service.py`.
+- Add guided profile-creation policy in `cli/init.py`, reusing diagnostics, interceptor, and profile
+  validation APIs rather than moving their ownership into the command module.
 - Add diagnostic checks and remediation in `diagnostics.py`, keeping command rendering in
   `cli/doctor.py` and operating-system resource handling in the owning adapter.
 - Add device and key presentation in `cli/monitor.py`, keeping evdev resources and reconnect behavior

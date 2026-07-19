@@ -6,7 +6,7 @@ import logging
 import argcomplete
 
 from ..logging_config import configure_logging
-from . import doctor, listen, monitor, service, validate
+from . import doctor, init, listen, monitor, service, validate
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,17 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser(
         'doctor',
         help='Check input permissions and runtime environment',
+    )
+
+    init_subparser = subparsers.add_parser(
+        'init',
+        help='Create a first profile through guided device and key detection',
+    )
+    init_subparser.add_argument(
+        '--timeout',
+        type=init.timeout_seconds,
+        default=60.0,
+        help='Seconds to wait for each device or key capture (default: 60).',
     )
 
     monitor_subparser = subparsers.add_parser(
@@ -95,6 +106,8 @@ def main() -> int:
         args = parse_args()
         if args.subcommand == 'doctor':
             return doctor.run()
+        if args.subcommand == 'init':
+            return init.run(args)
         if args.subcommand == 'monitor':
             return monitor.run(args)
         if args.subcommand == 'service':
