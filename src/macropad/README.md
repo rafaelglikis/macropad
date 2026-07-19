@@ -203,7 +203,7 @@ sequenceDiagram
     Device->>Interceptor: InputEvent
     Interceptor->>Handler: handle(event)
     Interceptor->>Handler: tick()
-    Handler->>Handler: resolve key, tap, hold, and layer state
+    Handler->>Handler: resolve key, tap, hold, and layer state with configured deadlines
     Handler->>Executor: submit(command)
     Executor->>Shell: Popen(shell=True, start_new_session=True)
     Interceptor->>Handler: tick on later loop iterations
@@ -212,8 +212,10 @@ sequenceDiagram
 ```
 
 Simple `up` or `down` bindings can execute immediately. Bindings involving hold, double-tap, or
-triple-tap resolution use monotonic deadlines and are advanced by `KeyboardHandler.tick()` on the
-listener thread. Layer timeouts use the same threadless mechanism.
+triple-tap resolution use the profile's `multi_tap_ms` monotonic deadline and are advanced by
+`KeyboardHandler.tick()` on the listener thread. One-shot layers use `one_shot_timeout_ms` through
+the same threadless mechanism. Omitted timing fields retain the 200 ms and 5,000 ms defaults. Hold
+recognition deliberately remains based on evdev kernel-repeat events rather than elapsed time.
 
 Actions are trusted shell strings. Each worker may have at most eight active actions; additional
 actions are dropped rather than queued and logged with the active count and limit. Action processes
@@ -376,8 +378,9 @@ prevent headless startup or event handling.
 `config.py` contains only immutable value objects:
 
 - `ProfileConfig` owns the device name, profile version, keyboard configuration, diagnostic source,
-  and deferred layer-reference paths used by merged validation.
-- `KeyboardConfig` owns base bindings and named layers.
+  deferred layer-reference paths, and explicit timing-field metadata used by merged validation.
+- `KeyboardConfig` owns base bindings, named layers, and effective timing configuration.
+- `TimingConfig` owns the multi-tap resolution and one-shot layer deadlines in milliseconds.
 - `LayerConfig` owns layer bindings.
 - `BindingConfig` maps event names to command tuples.
 - `FrozenDict` prevents nested mutation while keeping configurations comparable, hashable, and

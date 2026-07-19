@@ -4,6 +4,8 @@ from typing import Generic, TypeVar
 
 Key = TypeVar('Key')
 Value = TypeVar('Value')
+DEFAULT_MULTI_TAP_MS = 200
+DEFAULT_ONE_SHOT_TIMEOUT_MS = 5000
 
 
 class FrozenDict(Mapping[Key, Value], Generic[Key, Value]):
@@ -82,9 +84,16 @@ class LayerConfig:
 
 
 @dataclass(frozen=True)
+class TimingConfig:
+    multi_tap_ms: int = DEFAULT_MULTI_TAP_MS
+    one_shot_timeout_ms: int = DEFAULT_ONE_SHOT_TIMEOUT_MS
+
+
+@dataclass(frozen=True)
 class KeyboardConfig:
     bindings: FrozenDict[str, BindingConfig]
     layers: FrozenDict[str, LayerConfig]
+    timing: TimingConfig = field(default_factory=TimingConfig)
 
     def __post_init__(self):
         object.__setattr__(self, 'bindings', FrozenDict(self.bindings))
@@ -116,12 +125,21 @@ class ProfileConfig:
     keyboard: KeyboardConfig
     source: str = field(default='<profile>', repr=False, compare=False)
     layer_references: tuple[LayerReference, ...] = field(default=(), repr=False, compare=False)
+    timing_fields: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, 'layer_references', tuple(self.layer_references))
+        object.__setattr__(self, 'timing_fields', frozenset(self.timing_fields))
 
     def to_data(self) -> dict:
-        return {
+        data = {
             'device': self.device,
             'version': self.version,
         } | self.keyboard.to_data()
+        if self.timing_fields:
+            data['timing'] = {
+                field_name: getattr(self.keyboard.timing, field_name)
+                for field_name in ('multi_tap_ms', 'one_shot_timeout_ms')
+                if field_name in self.timing_fields
+            }
+        return data

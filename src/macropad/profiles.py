@@ -10,10 +10,15 @@ from .config import (
     LayerReference,
     ProfileConfig,
     ProfileValidationError,
+    TimingConfig,
 )
 
-PROFILE_FIELDS = {'device', 'version', 'bindings', 'layers'}
+PROFILE_FIELDS = {'device', 'version', 'timing', 'bindings', 'layers'}
 EVENT_NAMES = {'up', 'down', 'hold', 'double_tap', 'triple_tap'}
+TIMING_BOUNDS = {
+    'multi_tap_ms': (1, 5000),
+    'one_shot_timeout_ms': (1, 3_600_000),
+}
 KEY_NAMES = {
     key_name
     for key_names in ecodes.KEY.values()
@@ -101,14 +106,46 @@ def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileCon
     )
     layers = _parse_layers(profile_data.get('layers', {}), source, 'layers')
     layers = _merge_layers(layers, inline_layers, source)
+    if 'timing' in profile_data:
+        timing, timing_fields = _parse_timing(profile_data['timing'], source)
+    else:
+        timing, timing_fields = TimingConfig(), frozenset()
 
     return ProfileConfig(
         device=device,
         version=version,
-        keyboard=KeyboardConfig(bindings=bindings, layers=layers),
+        keyboard=KeyboardConfig(bindings=bindings, layers=layers, timing=timing),
         source=source,
         layer_references=_collect_layer_references(profile_data),
+        timing_fields=timing_fields,
     )
+
+
+def _parse_timing(timing, source: str) -> tuple[TimingConfig, frozenset[str]]:
+    if not isinstance(timing, dict):
+        raise ProfileValidationError(source, 'timing', 'expected a timing mapping')
+
+    for field_name in timing:
+        if not isinstance(field_name, str):
+            raise ProfileValidationError(source, 'timing', 'timing field names must be strings')
+    unknown_fields = set(timing) - TIMING_BOUNDS.keys()
+    if unknown_fields:
+        field_name = sorted(unknown_fields)[0]
+        raise ProfileValidationError(source, f'timing.{field_name}', 'unsupported timing field')
+
+    values = {}
+    for field_name, (minimum, maximum) in TIMING_BOUNDS.items():
+        if field_name not in timing:
+            continue
+        value = timing[field_name]
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ProfileValidationError(
+                source,
+                f'timing.{field_name}',
+                f'expected an integer from {minimum} to {maximum}',
+            )
+        values[field_name] = value
+    return TimingConfig(**values), frozenset(timing)
 
 
 def _parse_bindings(
@@ -373,6 +410,12 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
     version = profile_datas[0].version
     merged_bindings = {}
     merged_layers = {}
+    default_timing = TimingConfig()
+    merged_timing_values = {
+        'multi_tap_ms': default_timing.multi_tap_ms,
+        'one_shot_timeout_ms': default_timing.one_shot_timeout_ms,
+    }
+    merged_timing_fields = set()
 
     for config in profile_datas:
         if config.device != device:
@@ -387,6 +430,19 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
                 'version',
                 f'cannot merge version {config.version!r} with version {version!r}',
             )
+
+        for field_name in TIMING_BOUNDS:
+            if field_name not in config.timing_fields:
+                continue
+            value = getattr(config.keyboard.timing, field_name)
+            if field_name in merged_timing_fields and merged_timing_values[field_name] != value:
+                raise ProfileValidationError(
+                    config.source,
+                    f'timing.{field_name}',
+                    'conflicts with an earlier profile fragment',
+                )
+            merged_timing_values[field_name] = value
+            merged_timing_fields.add(field_name)
 
         for key_name, source_binding in config.keyboard.bindings.items():
             if key_name not in merged_bindings:
@@ -403,8 +459,13 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
     merged_profile = ProfileConfig(
         device=device,
         version=version,
-        keyboard=KeyboardConfig(bindings=merged_bindings, layers=merged_layers),
+        keyboard=KeyboardConfig(
+            bindings=merged_bindings,
+            layers=merged_layers,
+            timing=TimingConfig(**merged_timing_values),
+        ),
         source='<merged profile>',
+        timing_fields=merged_timing_fields,
     )
     _validate_merged_profile(profile_datas, merged_profile)
     return merged_profile
