@@ -6,7 +6,7 @@ import logging
 import argcomplete
 
 from ..logging_config import configure_logging
-from . import detect, listen, service, validate
+from . import listen, service, validate
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +14,6 @@ logger = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
     subparsers = parser.add_subparsers(title='Subcommands', dest='subcommand', required=True)
-
-    detect_subparser = subparsers.add_parser('detect', help='Detects input device')
-    detect_subparser.add_argument(
-        '--generate-profile',
-        help='Generates a profile for the given device.',
-        action='store_true',
-        dest='generate_profile',
-    )
 
     validate_subparser = subparsers.add_parser(
         'validate',
@@ -90,8 +82,6 @@ def main() -> int:
             return service.run(args.service_action)
         if args.subcommand == 'listen':
             return listen.run(args)
-        if args.subcommand == 'detect':
-            return detect.run(args)
         return validate.run(args)
     except KeyboardInterrupt:
         logger.info('keyboard interrupt received; exiting')

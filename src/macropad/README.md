@@ -14,14 +14,13 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
 | `cli/__init__.py`   | Parses arguments, dispatches commands, and handles process-wide command errors.                                                        |
 | `cli/listen.py`     | Coordinates listener startup, profile reloads, the parent supervision loop, and top-level shutdown.                                  |
-| `cli/detect.py`     | Detects a new input device and optionally generates a sample profile.                                                                 |
 | `cli/validate.py`   | Resolves validation inputs and delegates the standalone validation workflow.                                                          |
-| `cli/profile_files.py` | Creates the default configuration and discovers unique profile files for CLI commands.                                             |
+| `cli/profile_files.py` | Owns the default configuration path and discovers unique profile files for CLI commands.                                           |
 | `cli/service.py`    | Runs service command actions through explicit `systemctl --user` and `journalctl --user` invocations.                                |
 | `profile_watcher.py` | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                   |
 | `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
 | `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
-| `profiles.py`       | Loads strict YAML, validates, normalizes, groups, and merges profiles, serializes configurations, and creates samples.                 |
+| `profiles.py`       | Loads strict YAML and validates, normalizes, groups, and merges profile configurations.                                               |
 | `supervisor.py`     | Reconciles desired profiles with worker slots, owns child processes, applies restart backoff, and enforces bounded shutdown.           |
 | `worker.py`         | Defines the child-process entry point, installs the worker signal handler, constructs the keyboard handler, and owns handler shutdown. |
 | `interceptor.py`    | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler.        |
@@ -37,7 +36,6 @@ dependency direction, process lifecycle, or the profile and event flows change.
 flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli/__init__.py]
     CLI --> Listen[cli/listen.py]
-    CLI --> Detect[cli/detect.py]
     CLI --> ValidateCommand[cli/validate.py]
     CLI --> Service[cli/service.py]
 
@@ -45,10 +43,6 @@ flowchart TD
     Listen --> ProfileWatcher[profile_watcher.py]
     Listen --> Supervisor[supervisor.py]
     Listen --> Notifications[notifications.py]
-
-    Detect --> ProfileFiles
-    Detect --> Profiles[profiles.py]
-    Detect --> Interceptor[interceptor.py]
 
     ValidateCommand --> ProfileFiles
     ValidateCommand --> Validation[validation.py]
@@ -105,7 +99,7 @@ current `/dev/input/event*` nodes with that name.
 ## Startup Flow
 
 1. `cli.main()` configures logging, parses arguments, and dispatches to `cli.listen.run()`,
-   `cli.detect.run()`, `cli.validate.run()`, or `cli.service.run()`.
+   `cli.validate.run()`, or `cli.service.run()`.
 2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
 3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
    directories.
@@ -117,8 +111,9 @@ current `/dev/input/event*` nodes with that name.
 8. The interceptor waits for matching devices, opens and grabs every matching event node, and begins
    forwarding input events.
 
-If the default configuration directory is used, the CLI creates it when necessary, installs a sample
-profile if no YAML files exist, and automatically enables profile watching.
+If the default configuration directory contains profiles, the CLI automatically enables profile
+watching. If it does not exist or contains no YAML files, startup fails with profile-format guidance
+without creating directories or example files.
 
 The validation command module delegates to `validation.run()`, which uses the same complete load,
 validation, grouping, and merge path as worker startup, but never initializes notifications,
@@ -168,9 +163,10 @@ path reports `ENODEV`, it is closed and removed. The listener rescans only after
 has gone; it intentionally does not acquire an additional path while another matching path remains
 connected.
 
-`detect()` snapshots existing paths, waits for a new path even when another device disappears at the
-same time, and returns the new keyboard's name after observing a pressed key. Probe handles are
-always closed before it returns.
+The internal `detect()` helper snapshots existing paths, waits for a new path even when another
+device disappears at the same time, and returns the new keyboard's name after observing a pressed
+key. Probe handles are always closed before it returns. It is retained for the planned guided
+initialization flow rather than exposed as a standalone command.
 
 ## Profile Reload Flow
 

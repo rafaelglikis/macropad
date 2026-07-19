@@ -40,12 +40,6 @@ Listen using profiles from the default configuration directory:
 uv run macropad listen
 ```
 
-Detect a newly connected keyboard and generate a profile:
-
-```bash
-uv run macropad detect --generate-profile
-```
-
 Validate profiles without opening or grabbing input devices:
 
 ```bash

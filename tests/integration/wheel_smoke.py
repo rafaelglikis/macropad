@@ -57,7 +57,6 @@ def main() -> None:
                 'macropad/__main__.py',
                 'macropad/assets/macropad.svg',
                 'macropad/cli/__init__.py',
-                'macropad/cli/detect.py',
                 'macropad/cli/listen.py',
                 'macropad/cli/profile_files.py',
                 'macropad/cli/service.py',

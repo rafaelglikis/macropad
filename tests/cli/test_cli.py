@@ -130,23 +130,23 @@ class ProfileValidationCommandTests(unittest.TestCase):
         run_validation.assert_called_once_with(profile_paths)
 
     def test_validate_uses_default_directory_without_creating_it(self):
-        args = SimpleNamespace(profile_paths=[], profile_directories=None)
+        with tempfile.TemporaryDirectory() as temp_directory:
+            default_config_directory = pathlib.Path(temp_directory) / 'profiles'
+            args = SimpleNamespace(profile_paths=[], profile_directories=None)
 
-        with (
-            patch(
-                'macropad.cli.validate.profile_files.get_profile_paths',
-                return_value=[],
-            ) as get_profile_paths,
-            patch(
-                'macropad.cli.validate.profile_files.ensure_default_config'
-            ) as ensure_default_config,
-        ):
-            exit_status = validate_command.run(args)
+            with (
+                patch.object(
+                    profile_files,
+                    'DEFAULT_CONFIG_DIR',
+                    default_config_directory,
+                ),
+                patch('macropad.cli.profile_files.logger'),
+            ):
+                exit_status = validate_command.run(args)
 
         self.assertEqual(1, exit_status)
-        self.assertEqual([str(profile_files.DEFAULT_CONFIG_DIR)], args.profile_directories)
-        get_profile_paths.assert_called_once_with(args)
-        ensure_default_config.assert_not_called()
+        self.assertEqual([str(default_config_directory)], args.profile_directories)
+        self.assertFalse(default_config_directory.exists())
 
     def test_validate_arguments_support_files_and_directories(self):
         with patch(
@@ -268,19 +268,19 @@ class ShutdownSignalTests(unittest.TestCase):
         install_signal.assert_called_once_with(signal.SIGTERM, handler)
         self.assertTrue(shutdown_requested.is_set())
 
-    def test_detect_keeps_default_sigterm_behavior(self):
-        args = SimpleNamespace(subcommand='detect')
+    def test_validate_keeps_default_sigterm_behavior(self):
+        args = SimpleNamespace(subcommand='validate')
 
         with (
             patch('macropad.cli.configure_logging') as configure_logging,
             patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.detect.run', return_value=0) as run_detect,
+            patch('macropad.cli.validate.run', return_value=0) as run_validate,
             patch('macropad.cli.listen.install_shutdown_handler') as install_shutdown,
         ):
             exit_status = cli.main()
 
         self.assertEqual(0, exit_status)
-        run_detect.assert_called_once_with(args)
+        run_validate.assert_called_once_with(args)
         configure_logging.assert_called_once_with()
         install_shutdown.assert_not_called()
 
@@ -303,6 +303,40 @@ class MainExitStatusTests(unittest.TestCase):
             exit_status = listen.run(args)
 
         self.assertEqual(1, exit_status)
+        supervisor_type.return_value.start.assert_not_called()
+        supervisor_type.return_value.shutdown.assert_called_once_with()
+
+    def test_default_listen_with_no_profiles_does_not_create_configuration(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            default_config_directory = pathlib.Path(temp_directory) / 'profiles'
+            args = SimpleNamespace(
+                subcommand='listen',
+                profile_paths=[],
+                profile_directories=None,
+                watch=False,
+            )
+
+            with (
+                patch.object(
+                    profile_files,
+                    'DEFAULT_CONFIG_DIR',
+                    default_config_directory,
+                ),
+                patch('macropad.cli.listen.notifications.initialize'),
+                patch('macropad.cli.listen.install_shutdown_handler'),
+                patch('macropad.cli.profile_files.logger'),
+                patch('macropad.cli.listen.logger') as logger,
+                patch('macropad.cli.listen.ProfileSupervisor') as supervisor_type,
+            ):
+                exit_status = listen.run(args)
+
+        self.assertEqual(1, exit_status)
+        self.assertEqual([str(default_config_directory)], args.profile_directories)
+        self.assertFalse(default_config_directory.exists())
+        logger.error.assert_called_once_with(
+            'no profile files found; create a .yml profile or see README.md#profile-format',
+            extra={'path': str(default_config_directory)},
+        )
         supervisor_type.return_value.start.assert_not_called()
         supervisor_type.return_value.shutdown.assert_called_once_with()
 
@@ -412,25 +446,25 @@ class MainExitStatusTests(unittest.TestCase):
         supervisor_type.return_value.shutdown.assert_called_once_with()
 
     def test_unexpected_os_error_returns_failure(self):
-        args = SimpleNamespace(subcommand='detect')
+        args = SimpleNamespace(subcommand='validate')
 
         with (
             patch('macropad.cli.configure_logging'),
             patch('macropad.cli.parse_args', return_value=args),
-            patch('macropad.cli.detect.run', side_effect=OSError(5, 'input/output error')),
+            patch('macropad.cli.validate.run', side_effect=OSError(5, 'input/output error')),
         ):
             exit_status = cli.main()
 
         self.assertEqual(1, exit_status)
 
     def test_lost_input_device_returns_success(self):
-        args = SimpleNamespace(subcommand='detect')
+        args = SimpleNamespace(subcommand='listen')
 
         with (
             patch('macropad.cli.configure_logging'),
             patch('macropad.cli.parse_args', return_value=args),
             patch(
-                'macropad.cli.detect.run',
+                'macropad.cli.listen.run',
                 side_effect=OSError(errno.ENODEV, 'no such device'),
             ),
         ):

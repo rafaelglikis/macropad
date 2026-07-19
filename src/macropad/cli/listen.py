@@ -84,13 +84,21 @@ def run(args: argparse.Namespace) -> int:
     try:
         using_default_config = False
         if not args.profile_paths and not args.profile_directories:
-            profile_files.ensure_default_config()
             args.profile_directories = [str(profile_files.DEFAULT_CONFIG_DIR)]
             using_default_config = True
 
         all_profile_paths = profile_files.get_profile_paths(args)
         if not all_profile_paths:
-            logger.error('no profile files found')
+            if using_default_config:
+                logger.error(
+                    'no profile files found; create a .yml profile or see README.md#profile-format',
+                    extra={'path': str(profile_files.DEFAULT_CONFIG_DIR)},
+                )
+            else:
+                logger.error(
+                    'no profile files found; check the requested paths or see '
+                    'README.md#profile-format'
+                )
             return 1
 
         enable_watch = args.watch or using_default_config

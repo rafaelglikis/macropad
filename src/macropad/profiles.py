@@ -70,10 +70,6 @@ def load_yml(filename: str) -> ProfileConfig:
     return validate_profile_data(profile_data, source=str(filename))
 
 
-def dump_yml(profile_config: ProfileConfig) -> str:
-    return yaml.dump(profile_config.to_data(), sort_keys=False)
-
-
 def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileConfig:
     if not isinstance(profile_data, dict):
         raise ProfileValidationError(source, '', 'expected a YAML mapping')
@@ -460,20 +456,3 @@ def _validate_merged_profile(
                 reference.path,
                 f'references unknown layer {reference.name!r}',
             )
-
-
-def create_sample(device_name: str) -> ProfileConfig:
-    return ProfileConfig(
-        device=device_name,
-        version='1',
-        keyboard=KeyboardConfig(
-            bindings={
-                'KEY_UP': BindingConfig(
-                    actions={
-                        'up': ("notify-send Hey! 'Hello from macropad!'",),
-                    }
-                ),
-            },
-            layers={},
-        ),
-    )

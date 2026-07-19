@@ -2,8 +2,6 @@ import pickle
 import tempfile
 import unittest
 
-import yaml
-
 from macropad import profiles
 from macropad.config import FrozenDict
 
@@ -28,18 +26,6 @@ class ProfileTests(unittest.TestCase):
         }
         profile_data.update(overrides)
         return profile_data
-
-    def test_generated_profile_can_be_serialized(self):
-        generated_profile = profiles.create_sample('Demo Device')
-
-        profile_data = yaml.safe_load(profiles.dump_yml(generated_profile))
-
-        self.assertEqual('Demo Device', profile_data['device'])
-        self.assertEqual('1', profile_data['version'])
-        self.assertEqual(
-            {'KEY_UP': {'up': ["notify-send Hey! 'Hello from macropad!'"]}},
-            profile_data['bindings'],
-        )
 
     def test_validation_returns_typed_config_and_normalizes_version(self):
         profile_config = profiles.validate_profile_data(

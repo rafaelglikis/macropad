@@ -6,32 +6,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG_DIR = pathlib.Path.home() / '.config' / 'macropad' / 'profiles'
 
 
-def ensure_default_config() -> None:
-    if not DEFAULT_CONFIG_DIR.exists():
-        DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info(
-            'default configuration directory created',
-            extra={'path': str(DEFAULT_CONFIG_DIR)},
-        )
-
-    yml_files = list(DEFAULT_CONFIG_DIR.glob('*.yml'))
-    if not yml_files:
-        sample_profile_path = DEFAULT_CONFIG_DIR / 'sample_profile.yml'
-        sample_yml = """device: "Sample Device"
-version: '1'
-bindings:
-  KEY_UP:
-    up:
-      - notify-send 'Macropad' 'Welcome! Edit this profile in ~/.config/macropad/profiles/'
-"""
-        sample_profile_path.write_text(sample_yml)
-        logger.info('sample profile created', extra={'path': str(sample_profile_path)})
-        logger.info(
-            'edit profiles in configuration directory', extra={'path': str(DEFAULT_CONFIG_DIR)}
-        )
-        logger.info("run 'macropad detect --generate-profile' to create a device profile")
-
-
 def get_profile_paths(args: argparse.Namespace) -> list[str]:
     all_profile_paths = list(args.profile_paths) if args.profile_paths else []
 

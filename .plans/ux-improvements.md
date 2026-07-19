@@ -101,30 +101,30 @@ Verification:
 
 ### 3. Remove Misleading First-Run Sample Behavior
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Never report a healthy setup by running a worker for a fake keyboard.
 
 Deliverables:
 
-- Separate "ensure the directory exists" from "create example content."
-- Ensure `detect --generate-profile` creates only the detected-device profile on a clean setup.
-- Stop automatically starting a worker for `Sample Device` when `listen` has no real profiles.
-- When no profiles exist, return an actionable message directing the user to `init`, `detect`, or
-  the profile documentation.
-- Use a recognizable, collision-safe filename derived from the detected device rather than only
-  `profile.yml`, while retaining safe no-overwrite behavior.
-- Avoid depending on `notify-send` in generated examples unless its availability has been checked.
+- Remove automatic configuration-directory and sample-profile creation from `listen`.
+- Stop starting a worker for a fake `Sample Device` when no real profiles exist.
+- When no profiles exist, return an actionable message pointing to the expected location and profile
+  documentation.
+- Remove the public `detect` and `detect --generate-profile` surface rather than maintaining a
+  temporary profile-generation workflow that `monitor` and `init` will replace.
+- Retain low-level device detection only as an internal primitive for the guided initialization flow.
+- Remove unused sample serialization code and its `notify-send` dependency.
 
 Acceptance criteria:
 
-- A clean `detect --generate-profile` creates exactly one profile.
-- `listen` with no profiles does not create files or wait indefinitely for a fake device.
-- Existing files are never overwritten.
+- `listen` with no profiles creates no directories or files and does not wait for a fake device.
+- The public CLI no longer advertises `detect` or profile generation.
+- Existing profile files are never modified.
 
 Verification:
 
-- Add tests using an isolated temporary home/config directory.
+- Add tests using an isolated temporary configuration directory.
 - Run `make format`, `make lint`, and `make test`.
 
 ### 4. Add Permission And Environment Diagnostics
@@ -194,11 +194,9 @@ Deliverables:
 - Add `macropad init` that performs relevant doctor checks, explains reconnect detection, detects a
   keyboard, records at least one key, asks for an initial command, writes a profile, validates it,
   and shows the next foreground/service command.
-- Improve `detect --help` so users know they must connect or reconnect a device after detection
-  starts and then press a key.
+- Explain that users must connect or reconnect a device after detection starts and then press a key.
 - Provide clear cancellation and timeout behavior instead of waiting silently forever.
 - Confirm the exact generated path and whether profile watching will pick it up.
-- Keep noninteractive `detect --generate-profile` available for scripts.
 
 Acceptance criteria:
 
