@@ -22,11 +22,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes libdbus-1-dev libglib2.0-dev pkg-config
-
       - name: Install uv and Python
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:

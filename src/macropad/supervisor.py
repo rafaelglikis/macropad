@@ -50,6 +50,7 @@ class ProfileSupervisor:
         action_debug=False,
         verbose=False,
         debug=False,
+        notifications_enabled=True,
         status_queue=None,
         status_publisher=None,
     ):
@@ -60,6 +61,7 @@ class ProfileSupervisor:
         self.action_debug = action_debug
         self.verbose = verbose
         self.debug = debug
+        self.notifications_enabled = notifications_enabled
         self._owns_status_queue = status_queue is None
         self._status_queue = status_queue if status_queue is not None else multiprocessing.Queue()
         self._next_runtime_id = 1
@@ -193,6 +195,7 @@ class ProfileSupervisor:
                 self.debug,
                 self._status_queue,
                 worker.runtime_id,
+                self.notifications_enabled,
             ),
         )
         started = False

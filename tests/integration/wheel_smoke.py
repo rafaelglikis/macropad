@@ -34,6 +34,7 @@ def main() -> None:
         temp_path = Path(temp_dir)
         dist_path = temp_path / 'dist'
         environment_path = temp_path / 'environment'
+        notification_environment_path = temp_path / 'notification-environment'
         work_path = temp_path / 'work'
         work_path.mkdir()
 
@@ -97,6 +98,19 @@ def main() -> None:
             if metadata['Name'] != 'poor-mans-macropad':
                 raise RuntimeError('wheel has the wrong distribution name')
             package_version = metadata['Version']
+            if metadata.get_all('Provides-Extra', []) != ['notifications']:
+                raise RuntimeError('wheel does not declare the notifications extra')
+            requirements = metadata.get_all('Requires-Dist', [])
+            notification_requirements = [
+                requirement
+                for requirement in requirements
+                if requirement.startswith(('dbus-python', 'notify2'))
+            ]
+            if len(notification_requirements) != 2 or any(
+                "extra == 'notifications'" not in requirement
+                for requirement in notification_requirements
+            ):
+                raise RuntimeError('notification dependencies are not isolated in their extra')
             if metadata['License-Expression'] != 'MIT':
                 raise RuntimeError('wheel does not declare the MIT license')
             if metadata['Description-Content-Type'] != 'text/markdown':
@@ -144,8 +158,13 @@ def main() -> None:
                 '-c',
                 (
                     'from importlib.resources import files; '
+                    'from importlib.util import find_spec; '
                     'from pathlib import Path; '
                     'import macropad; '
+                    'from macropad import notifications; '
+                    "assert find_spec('notify2') is None; "
+                    "assert find_spec('dbus') is None; "
+                    "notifications.send('Smoke test', 'Optional backend is absent'); "
                     "asset = files('macropad').joinpath('assets/macropad.svg'); "
                     'assert asset.is_file(); '
                     'print(Path(macropad.__file__).resolve())'
@@ -158,7 +177,39 @@ def main() -> None:
         if package_path == PROJECT_ROOT or PROJECT_ROOT in package_path.parents:
             raise RuntimeError('smoke test imported macropad from the source checkout')
 
-        print(f'verified wheel: {wheel_path.name}')
+        run(
+            ['uv', 'venv', '--python', sys.executable, str(notification_environment_path)],
+            PROJECT_ROOT,
+            clean_env,
+        )
+        notification_python_path = notification_environment_path / 'bin/python'
+        run(
+            [
+                'uv',
+                'pip',
+                'install',
+                '--python',
+                str(notification_python_path),
+                f'{wheel_path}[notifications]',
+            ],
+            work_path,
+            clean_env,
+        )
+        run(
+            [
+                str(notification_python_path),
+                '-c',
+                (
+                    'from importlib.util import find_spec; '
+                    "assert find_spec('notify2') is not None; "
+                    "assert find_spec('dbus') is not None"
+                ),
+            ],
+            work_path,
+            clean_env,
+        )
+
+        print(f'verified base and notification-extra wheel installs: {wheel_path.name}')
 
 
 if __name__ == '__main__':

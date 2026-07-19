@@ -27,9 +27,10 @@ def quote_exec_path(path: Path) -> str:
     return f'"{escaped}"'
 
 
-def render_unit(executable: Path) -> str:
+def render_unit(executable: Path, notifications_enabled: bool = True) -> str:
     if not executable.is_absolute():
         raise ValueError('service executable path must be absolute')
+    notification_option = '' if notifications_enabled else '--no-notifications '
     return (
         f'{GENERATED_MARKER}\n'
         '[Unit]\n'
@@ -40,7 +41,7 @@ def render_unit(executable: Path) -> str:
         'Type=simple\n'
         'Environment=PYTHONUNBUFFERED=1\n'
         f'Environment=PATH={ACTION_PATH}\n'
-        f'ExecStart={quote_exec_path(executable)} --verbose listen --watch\n'
+        f'ExecStart={quote_exec_path(executable)} {notification_option}--verbose listen --watch\n'
         'KillMode=mixed\n'
         'TimeoutStopSec=10\n'
         'Restart=on-failure\n'

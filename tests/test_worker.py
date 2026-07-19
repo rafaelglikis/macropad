@@ -29,6 +29,7 @@ class WorkerTests(unittest.TestCase):
 
         with (
             patch('macropad.worker.configure_logging') as configure_logging,
+            patch('macropad.worker.notifications.configure') as configure_notifications,
             patch('macropad.worker.install_shutdown_handler') as install_shutdown_handler,
             patch('macropad.worker.ActionExecutor', return_value=action_executor) as executor_type,
             patch('macropad.worker.KeyboardHandler', return_value=handler) as handler_type,
@@ -40,9 +41,11 @@ class WorkerTests(unittest.TestCase):
                 action_debug=True,
                 verbose=True,
                 debug=False,
+                notifications_enabled=False,
             )
 
         configure_logging.assert_called_once_with(verbose=True, debug=True)
+        configure_notifications.assert_called_once_with(False)
         install_shutdown_handler.assert_called_once_with(shutdown_event)
         executor_type.assert_called_once_with(device='Macro Keyboard', debug_output=True)
         handler_type.assert_called_once_with(

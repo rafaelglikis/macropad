@@ -1,6 +1,6 @@
 import signal
 
-from . import interceptor
+from . import interceptor, notifications
 from .actions import ActionExecutor
 from .config import ProfileConfig
 from .handlers import KeyboardHandler
@@ -22,8 +22,10 @@ def run(
     debug: bool = False,
     status_queue=None,
     worker_id: int = 0,
+    notifications_enabled: bool = True,
 ) -> None:
     configure_logging(verbose=verbose, debug=debug or action_debug)
+    notifications.configure(notifications_enabled)
     install_shutdown_handler(shutdown_event)
     last_status = None
 

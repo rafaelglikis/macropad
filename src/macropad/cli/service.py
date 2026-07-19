@@ -92,14 +92,18 @@ def _run_systemctl(*arguments: str) -> int:
     return subprocess.run(['systemctl', '--user', *arguments], check=False).returncode
 
 
-def install(force: bool = False) -> int:
+def install(force: bool = False, notifications_enabled: bool = True) -> int:
     try:
         executable = service_unit.resolve_executable()
         unit_path = service_unit.resolve_unit_path()
         service_info = get_info()
         if service_info.fragment_path:
             service_unit.validate_unit_ownership(Path(service_info.fragment_path), force)
-        service_unit.install_unit(unit_path, service_unit.render_unit(executable), force=force)
+        service_unit.install_unit(
+            unit_path,
+            service_unit.render_unit(executable, notifications_enabled),
+            force=force,
+        )
     except (OSError, ValueError, RuntimeError) as error:
         print(f'Could not install service: {error}')
         return 1
@@ -144,9 +148,9 @@ def uninstall() -> int:
     return result
 
 
-def run(action: str, force: bool = False) -> int:
+def run(action: str, force: bool = False, notifications_enabled: bool = True) -> int:
     if action == 'install':
-        return install(force)
+        return install(force, notifications_enabled)
     if action == 'uninstall':
         return uninstall()
     if action == 'logs':

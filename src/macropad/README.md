@@ -33,7 +33,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `interceptor.py`       | Discovers evdev devices, detects newly connected keyboards, grabs matching event nodes, and forwards input events to a handler.        |
 | `handlers.py`          | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions.                            |
 | `actions.py`           | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit.                                      |
-| `notifications.py`     | Initializes optional desktop notifications and sends notifications without making them a runtime requirement.                          |
+| `notifications.py`     | Lazily imports the optional desktop backend, caches unavailability per process, and sends notifications when enabled.                  |
 | `logging_config.py`    | Selects normal, verbose, or debug levels and renders structured context fields consistently.                                           |
 | `assets/`              | Contains package resources, currently the desktop notification icon.                                                                   |
 
@@ -101,7 +101,7 @@ flowchart TD
 
     Interceptor --> Evdev[evdev]
     Actions --> Shell[detached shell processes]
-    Notifications --> Notify2[notify2 and DBus]
+    Notifications -. optional .-> Notify2[notify2 and DBus]
 ```
 
 Dependencies should continue to point inward toward immutable configuration and outward toward
@@ -117,7 +117,8 @@ system adapters. In particular:
 - `worker.py` is the boundary where immutable configuration becomes mutable runtime state.
 - `interceptor.py` owns evdev resources but does not construct or shut down handlers.
 - `handlers.py` may submit actions and notifications but must not manage worker processes.
-- `actions.py`, `notifications.py`, and `interceptor.py` are adapters to operating-system services.
+- `actions.py`, `notifications.py`, and `interceptor.py` are adapters to operating-system services;
+  the notification adapter must remain importable without its optional backend dependencies.
 
 ## Process Model
 
@@ -125,8 +126,8 @@ The CLI runs in the parent process. `ProfileSupervisor` maintains one worker slo
 keyboard name. Each slot has its own `multiprocessing.Process`, shutdown event, restart counters, and
 retry deadline.
 
-Only immutable `ProfileConfig` data, logging option booleans, a worker generation ID, and the shared
-status queue cross the process boundary. The
+Only immutable `ProfileConfig` data, logging and notification option booleans, a worker generation
+ID, and the shared status queue cross the process boundary. The
 parent does not construct a `KeyboardHandler` or `ActionExecutor`. The child enters through
 `worker.run()`, configures its own logging so non-fork start methods behave consistently, installs its
 SIGTERM handler, constructs the executor and handler, and then enters the interception loop. This
@@ -138,10 +139,11 @@ current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` parses global logging options, configures normal, verbose, or debug logging, and
-   dispatches to the focused `doctor`, `init`, `listen`, `monitor`, `validate`, or `service` command
-   module.
-2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
+1. `cli.main()` parses global logging and notification options, configures process-wide preferences,
+   and dispatches to the focused `doctor`, `init`, `listen`, `monitor`, `validate`, or `service`
+   command module.
+2. `cli.listen.run()` installs the parent SIGTERM handler without importing the optional notification
+   backend.
 3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
    directories.
 4. `ProfileSupervisor.start()` calls `prepare_profiles()` before starting any process.
@@ -224,6 +226,12 @@ The executor retains that trigger context through command start, process ID, exi
 concurrency rejection records, including when identical commands run concurrently. Debug startup
 logging reports only the action working directory, `PATH`, display names, DBus presence, and output
 mode rather than dumping the full environment or DBus address.
+
+Notification preference is passed through `ProfileSupervisor` to every worker so spawn and fork
+process starts behave consistently. Each process imports and initializes `notify2` only on its first
+notification attempt. Missing dependencies, initialization failure, or send failure disables later
+attempts in that process after one warning. `--no-notifications` avoids backend import entirely; when
+used with `service install`, the generated unit retains that global option.
 
 The generated systemd user unit gives actions a deterministic `PATH` containing `~/bin`,
 `~/.local/bin`, and standard system command directories. It invokes the console script from the
