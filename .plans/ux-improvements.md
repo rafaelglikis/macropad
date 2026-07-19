@@ -72,7 +72,7 @@ Verification:
 
 ### 2. Make Profile Watching Reliable For Real Editors
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Ensure every completed save eventually reloads exactly the latest complete profile set.
 

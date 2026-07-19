@@ -12,7 +12,8 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | Module              | Responsibility                                                                                                                         |
 |---------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | `__main__.py`       | Implements the `python -m macropad` entry point by delegating to `cli.main()`.                                                         |
-| `cli.py`            | Parses and dispatches commands, discovers profile files, owns profile watching, and coordinates top-level shutdown.                    |
+| `cli.py`            | Parses and dispatches commands, discovers profile files, coordinates profile reloads, and owns top-level shutdown.                    |
+| `profile_watcher.py` | Adapts Watchdog events, manages the polling observer, and schedules trailing-edge profile reloads.                                   |
 | `validation.py`     | Loads complete validation candidates, collects file and merged errors, and renders validation reports.                                 |
 | `config.py`         | Defines the deeply immutable, picklable profile configuration model and validation error type.                                         |
 | `profiles.py`       | Loads strict YAML, validates, normalizes, groups, and merges profiles, serializes configurations, and creates samples.                 |
@@ -31,6 +32,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 flowchart TD
     Entrypoints[macropad and python -m macropad] --> CLI[cli.py]
     CLI --> Profiles[profiles.py]
+    CLI --> ProfileWatcher[profile_watcher.py]
     CLI --> Validation[validation.py]
     CLI --> Supervisor[supervisor.py]
     CLI --> Interceptor[interceptor.py]
@@ -43,6 +45,7 @@ flowchart TD
     Validation --> Profiles
     Validation --> Config
     Profiles --> Config[config.py]
+    ProfileWatcher --> Watchdog[watchdog]
 
     Worker --> Handler[handlers.py]
     Worker --> Interceptor
@@ -60,6 +63,7 @@ Dependencies should continue to point inward toward immutable configuration and 
 system adapters. In particular:
 
 - `profiles.py` must remain independent of worker, handler, process, and device state.
+- `profile_watcher.py` owns filesystem event filtering and reload timing but never reloads profiles.
 - `supervisor.py` owns processes but does not process keyboard events.
 - `worker.py` is the boundary where immutable configuration becomes mutable runtime state.
 - `interceptor.py` owns evdev resources but does not construct or shut down handlers.
@@ -148,8 +152,31 @@ always closed before it returns.
 ## Profile Reload Flow
 
 The Watchdog polling observer runs in a background thread, but it never reloads configuration itself.
-It places changed YAML paths into a queue owned by the CLI. The parent supervision loop drains that
-queue and invokes `ProfileSupervisor.reload()`.
+It inspects both source and destination paths for each event and places every relevant `.yml` path
+into a queue owned by the CLI. This catches direct writes, create/delete events, profile renames, and
+atomic saves that move a temporary file onto a profile.
+
+```mermaid
+sequenceDiagram
+    participant Watchdog
+    participant Queue as Reload queue
+    participant CLI as Parent supervision loop
+    participant Scheduler as Reload scheduler
+    participant Supervisor as ProfileSupervisor
+
+    Watchdog->>Queue: Changed source/destination .yml path
+    CLI->>Queue: Drain pending paths
+    Queue-->>CLI: Event burst
+    CLI->>Scheduler: Add paths at monotonic time
+    Note over Scheduler: Deduplicate paths and reset one-second deadline
+    CLI->>Scheduler: Check deadline each supervision cycle
+    Scheduler-->>CLI: Paths after a quiet second
+    CLI->>Supervisor: Reload complete current profile set
+```
+
+The scheduler is owned by the parent loop. Every new batch moves its monotonic deadline forward, so
+reload happens only after one quiet second. The resulting changed-path list is deduplicated and
+included in reload success and failure logs.
 
 Reload follows a validate-then-reconcile model:
 
@@ -198,6 +225,8 @@ source names and field paths in every validation error because reload diagnostic
 - Add evdev discovery or handle behavior in `interceptor.py` without moving process policy there.
 - Add worker process setup or cleanup in `worker.py`.
 - Add reconciliation, restart, or bounded-shutdown policy in `supervisor.py`.
+- Add Watchdog event handling, observer lifecycle, or reload debounce behavior in
+  `profile_watcher.py`.
 - Add command-line orchestration in `cli.py`; create a command package only if command count or
   complexity materially grows.
 - Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in

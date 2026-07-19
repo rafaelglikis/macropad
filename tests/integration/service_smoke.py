@@ -9,10 +9,17 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_MESSAGE = 'profile watch mode enabled'
+RELOAD_MESSAGE = 'profiles reloaded'
 PROFILE = """device: "Macropad CI Missing Device"
 version: '1'
 bindings:
   KEY_A:
+    up: 'true'
+"""
+UPDATED_PROFILE = """device: "Macropad CI Missing Device"
+version: '1'
+bindings:
+  KEY_B:
     up: 'true'
 """
 
@@ -23,12 +30,35 @@ def read_stderr(stream, lines: queue.Queue, output: list[str]) -> None:
         lines.put(line)
 
 
+def wait_for_message(
+    process: subprocess.Popen,
+    lines: queue.Queue,
+    output: list[str],
+    message: str,
+    description: str,
+) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            line = lines.get(timeout=0.1)
+        except queue.Empty:
+            if process.poll() is not None:
+                break
+            continue
+        if message in line:
+            return
+    if any(message in line for line in output):
+        return
+    raise RuntimeError(description)
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix='macropad-service-') as temp_dir:
         temp_path = Path(temp_dir)
         profile_directory = temp_path / 'profiles'
         profile_directory.mkdir()
-        (profile_directory / 'ci.yml').write_text(PROFILE)
+        profile_path = profile_directory / 'ci.yml'
+        profile_path.write_text(PROFILE)
 
         environment = os.environ.copy()
         environment['HOME'] = str(temp_path / 'home')
@@ -60,21 +90,24 @@ def main() -> None:
         reader.start()
 
         try:
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                try:
-                    line = lines.get(timeout=0.1)
-                except queue.Empty:
-                    if process.poll() is not None:
-                        break
-                    continue
-                if STARTUP_MESSAGE in line:
-                    break
-            else:
-                raise RuntimeError('service did not become ready before timeout')
+            wait_for_message(
+                process,
+                lines,
+                output,
+                STARTUP_MESSAGE,
+                'service did not become ready before timeout',
+            )
 
-            if not any(STARTUP_MESSAGE in line for line in output):
-                raise RuntimeError('service exited before startup completed')
+            replacement_path = profile_directory / '.ci.yml.tmp'
+            replacement_path.write_text(UPDATED_PROFILE)
+            os.replace(replacement_path, profile_path)
+            wait_for_message(
+                process,
+                lines,
+                output,
+                RELOAD_MESSAGE,
+                'service did not reload an atomically replaced profile',
+            )
 
             process.terminate()
             return_code = process.wait(timeout=10)
@@ -86,7 +119,7 @@ def main() -> None:
                 process.wait()
             reader.join(timeout=1)
 
-        print('verified service startup and graceful shutdown')
+        print('verified service startup, atomic reload, and graceful shutdown')
 
 
 if __name__ == '__main__':

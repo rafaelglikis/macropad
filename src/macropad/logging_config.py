@@ -4,6 +4,7 @@ CONTEXT_FIELDS = (
     'device',
     'device_info',
     'profiles',
+    'changed_paths',
     'path',
     'key',
     'event',

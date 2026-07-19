@@ -189,9 +189,11 @@ bindings:
 Bindings for different keys or events combine. Defining different commands for the same device,
 layer, key, and event is a conflict and validation fails with the later file and field path.
 
-When default profiles or `--watch` directories are used, Macropad reloads after `.yml` changes. The
-complete candidate set is loaded and merged first. An invalid edit is reported while the last valid
-workers continue running.
+When default profiles or `--watch` directories are used, Macropad recognizes `.yml` files that are
+created, modified, deleted, or moved. Move events inspect both source and destination paths so
+editors that atomically replace profiles through temporary files are supported. A burst of changes
+is coalesced until the directory has been quiet for one second, then the complete candidate set is
+loaded and merged once. An invalid edit is reported while the last valid workers continue running.
 
 ### Action Execution And Security
 

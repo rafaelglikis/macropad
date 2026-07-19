@@ -9,42 +9,13 @@ import threading
 import time
 
 import argcomplete
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers.polling import PollingObserver
 
-from . import interceptor, notifications, profiles, validation
+from . import interceptor, notifications, profile_watcher, profiles, validation
 from .logging_config import configure_logging
 from .supervisor import ProfileSupervisor
 
 logger = logging.getLogger(__name__)
 DEFAULT_CONFIG_DIR = pathlib.Path.home() / '.config' / 'macropad' / 'profiles'
-
-
-class ProfileReloadHandler(FileSystemEventHandler):
-    def __init__(self, reload_requests: queue.SimpleQueue):
-        self.reload_requests = reload_requests
-        self.last_reload = 0
-        self.debounce_seconds = 1.0
-
-    def on_any_event(self, event: FileSystemEvent):
-        if event.is_directory or not event.src_path.endswith('.yml'):
-            return
-
-        current_time = time.monotonic()
-        if current_time - self.last_reload < self.debounce_seconds:
-            return
-
-        self.last_reload = current_time
-        self.reload_requests.put(event.src_path)
-
-
-def drain_reload_requests(reload_requests: queue.SimpleQueue) -> list[str]:
-    changed_paths = []
-    while True:
-        try:
-            changed_paths.append(reload_requests.get_nowait())
-        except queue.Empty:
-            return changed_paths
 
 
 def ensure_default_config():
@@ -156,15 +127,24 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namespace) -> bool:
-    logger.info('reloading profiles')
+def reload_profiles(
+    profile_supervisor: ProfileSupervisor,
+    args: argparse.Namespace,
+    changed_paths=(),
+) -> bool:
+    changed_paths = tuple(changed_paths)
+    logger.info('reloading profiles', extra={'changed_paths': changed_paths})
     profile_paths = get_profile_paths(args)
     try:
         profile_supervisor.reload(profile_paths)
     except Exception as error:
         logger.error(
             'profile reload failed',
-            extra={'profiles': tuple(profile_paths), 'error': str(error)},
+            extra={
+                'profiles': tuple(profile_paths),
+                'changed_paths': changed_paths,
+                'error': str(error),
+            },
         )
         notifications.send(
             title='Macropad Configuration Error',
@@ -173,7 +153,10 @@ def reload_profiles(profile_supervisor: ProfileSupervisor, args: argparse.Namesp
         return False
 
     worker_count = len(profile_supervisor.workers)
-    logger.info('profiles reloaded', extra={'count': worker_count})
+    logger.info(
+        'profiles reloaded',
+        extra={'count': worker_count, 'changed_paths': changed_paths},
+    )
     notifications.send(
         title='Macropad Configuration Updated',
         message=f'Successfully reloaded {worker_count} profile(s)',
@@ -185,11 +168,14 @@ def run_supervision_cycle(
     profile_supervisor: ProfileSupervisor,
     args: argparse.Namespace,
     reload_requests: queue.SimpleQueue,
+    reload_scheduler: profile_watcher.ProfileReloadScheduler,
 ) -> None:
-    changed_paths = drain_reload_requests(reload_requests)
+    now = time.monotonic()
+    reload_scheduler.add_changes(profile_watcher.drain_reload_requests(reload_requests), now)
+    changed_paths = reload_scheduler.pop_due(now)
     if changed_paths:
-        logger.info('profile changes detected', extra={'profiles': tuple(changed_paths)})
-        reload_profiles(profile_supervisor, args)
+        logger.info('profile changes detected', extra={'changed_paths': tuple(changed_paths)})
+        reload_profiles(profile_supervisor, args, changed_paths)
     profile_supervisor.tick()
 
 
@@ -200,41 +186,10 @@ def install_shutdown_handler(shutdown_requested: threading.Event) -> None:
     signal.signal(signal.SIGTERM, request_shutdown)
 
 
-def start_profile_observer(
-    watch_directories: list[pathlib.Path],
-    reload_requests: queue.SimpleQueue,
-) -> PollingObserver:
-    observer = PollingObserver()
-    event_handler = ProfileReloadHandler(reload_requests)
-    for directory in watch_directories:
-        observer.schedule(
-            event_handler,
-            str(directory),
-            recursive=False,
-        )
-        logger.info('watching profile directory', extra={'path': str(directory)})
-
-    try:
-        observer.start()
-    except Exception:
-        if observer.is_alive():
-            observer.stop()
-            observer.join()
-        raise
-
-    logger.info('profile watch mode enabled')
-    return observer
-
-
-def stop_profile_observer(observer: PollingObserver | None) -> None:
-    if observer is not None and observer.is_alive():
-        observer.stop()
-        observer.join()
-
-
 def run_listen(args: argparse.Namespace) -> int:
     observer = None
     reload_requests = queue.SimpleQueue()
+    reload_scheduler = profile_watcher.ProfileReloadScheduler()
     profile_supervisor = ProfileSupervisor()
     shutdown_requested = threading.Event()
     install_shutdown_handler(shutdown_requested)
@@ -279,7 +234,10 @@ def run_listen(args: argparse.Namespace) -> int:
 
         if enable_watch:
             try:
-                observer = start_profile_observer(watch_directories, reload_requests)
+                observer = profile_watcher.start_profile_observer(
+                    watch_directories,
+                    reload_requests,
+                )
             except Exception as error:
                 logger.error(
                     'failed to start profile observer',
@@ -289,12 +247,17 @@ def run_listen(args: argparse.Namespace) -> int:
 
         try:
             while not shutdown_requested.wait(1):
-                run_supervision_cycle(profile_supervisor, args, reload_requests)
+                run_supervision_cycle(
+                    profile_supervisor,
+                    args,
+                    reload_requests,
+                    reload_scheduler,
+                )
         except KeyboardInterrupt:
             pass
         return 0
     finally:
-        stop_profile_observer(observer)
+        profile_watcher.stop_profile_observer(observer)
         profile_supervisor.shutdown()
 
 

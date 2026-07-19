@@ -7,32 +7,9 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from macropad import cli
-
-
-class ProfileReloadHandlerTests(unittest.TestCase):
-    def test_file_event_is_queued_without_running_reload_work(self):
-        reload_requests = queue.SimpleQueue()
-        event_handler = cli.ProfileReloadHandler(reload_requests)
-        event = SimpleNamespace(is_directory=False, src_path='/profiles/macros.yml')
-
-        with patch('macropad.cli.time.monotonic', return_value=10.0):
-            event_handler.on_any_event(event)
-
-        self.assertEqual(['/profiles/macros.yml'], cli.drain_reload_requests(reload_requests))
-
-    def test_reload_requests_are_drained_as_one_batch(self):
-        reload_requests = queue.SimpleQueue()
-        reload_requests.put('/profiles/first.yml')
-        reload_requests.put('/profiles/second.yml')
-
-        self.assertEqual(
-            ['/profiles/first.yml', '/profiles/second.yml'],
-            cli.drain_reload_requests(reload_requests),
-        )
-        self.assertEqual([], cli.drain_reload_requests(reload_requests))
 
 
 class ProfileReloadTests(unittest.TestCase):
@@ -46,14 +23,65 @@ class ProfileReloadTests(unittest.TestCase):
         with (
             patch('macropad.cli.get_profile_paths', return_value=['/profiles/macros.yml']),
             patch('macropad.cli.notifications.send') as send_notification,
+            patch('macropad.cli.logger') as logger,
         ):
-            succeeded = cli.reload_profiles(profile_supervisor, args)
+            succeeded = cli.reload_profiles(
+                profile_supervisor,
+                args,
+                ['/profiles/changed.yml'],
+            )
 
         self.assertTrue(succeeded)
         profile_supervisor.reload.assert_called_once_with(['/profiles/macros.yml'])
         send_notification.assert_called_once_with(
             title='Macropad Configuration Updated',
             message='Successfully reloaded 2 profile(s)',
+        )
+        self.assertEqual(
+            [
+                call(
+                    'reloading profiles',
+                    extra={'changed_paths': ('/profiles/changed.yml',)},
+                ),
+                call(
+                    'profiles reloaded',
+                    extra={
+                        'count': 2,
+                        'changed_paths': ('/profiles/changed.yml',),
+                    },
+                ),
+            ],
+            logger.info.call_args_list,
+        )
+
+    def test_failed_reload_reports_candidate_and_changed_paths(self):
+        current_worker = object()
+        profile_supervisor = SimpleNamespace(
+            workers={'current': current_worker},
+            reload=Mock(side_effect=ValueError('invalid binding')),
+        )
+        args = SimpleNamespace()
+
+        with (
+            patch('macropad.cli.get_profile_paths', return_value=['/profiles/macros.yml']),
+            patch('macropad.cli.notifications.send'),
+            patch('macropad.cli.logger') as logger,
+        ):
+            succeeded = cli.reload_profiles(
+                profile_supervisor,
+                args,
+                ['/profiles/changed.yml'],
+            )
+
+        self.assertFalse(succeeded)
+        self.assertIs(current_worker, profile_supervisor.workers['current'])
+        logger.error.assert_called_once_with(
+            'profile reload failed',
+            extra={
+                'profiles': ('/profiles/macros.yml',),
+                'changed_paths': ('/profiles/changed.yml',),
+                'error': 'invalid binding',
+            },
         )
 
 
@@ -137,9 +165,54 @@ class SupervisionCycleTests(unittest.TestCase):
             profile_supervisor,
             SimpleNamespace(),
             queue.SimpleQueue(),
+            cli.profile_watcher.ProfileReloadScheduler(),
         )
 
         profile_supervisor.tick.assert_called_once_with()
+
+    def test_reload_runs_once_after_all_changes_are_quiet(self):
+        profile_supervisor = SimpleNamespace(tick=Mock())
+        args = SimpleNamespace()
+        reload_requests = queue.SimpleQueue()
+        reload_scheduler = cli.profile_watcher.ProfileReloadScheduler(debounce_seconds=1.0)
+        reload_requests.put('/profiles/first.yml')
+
+        with (
+            patch('macropad.cli.time.monotonic', side_effect=[10.0, 10.5, 11.4, 11.5]),
+            patch('macropad.cli.reload_profiles') as reload_profiles,
+        ):
+            cli.run_supervision_cycle(
+                profile_supervisor,
+                args,
+                reload_requests,
+                reload_scheduler,
+            )
+            reload_requests.put('/profiles/second.yml')
+            cli.run_supervision_cycle(
+                profile_supervisor,
+                args,
+                reload_requests,
+                reload_scheduler,
+            )
+            cli.run_supervision_cycle(
+                profile_supervisor,
+                args,
+                reload_requests,
+                reload_scheduler,
+            )
+            cli.run_supervision_cycle(
+                profile_supervisor,
+                args,
+                reload_requests,
+                reload_scheduler,
+            )
+
+        reload_profiles.assert_called_once_with(
+            profile_supervisor,
+            args,
+            ['/profiles/first.yml', '/profiles/second.yml'],
+        )
+        self.assertEqual(4, profile_supervisor.tick.call_count)
 
 
 class ShutdownSignalTests(unittest.TestCase):
@@ -224,7 +297,7 @@ class MainExitStatusTests(unittest.TestCase):
             patch('macropad.cli.notifications.initialize'),
             patch('macropad.cli.install_shutdown_handler'),
             patch('macropad.cli.ProfileSupervisor') as supervisor_type,
-            patch('macropad.cli.PollingObserver') as observer_type,
+            patch('macropad.profile_watcher.PollingObserver') as observer_type,
         ):
             observer_type.return_value.start.side_effect = RuntimeError('observer failed')
             observer_type.return_value.is_alive.return_value = False
