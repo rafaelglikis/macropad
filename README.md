@@ -87,6 +87,18 @@ pipx install 'poor-mans-macropad[notifications]'
 uv tool install 'poor-mans-macropad[notifications]'
 ```
 
+The notification dependencies are installed only when the `notifications` extra is explicitly
+requested. A base `pipx install poor-mans-macropad` or `uv tool install poor-mans-macropad`
+intentionally omits `dbus-python` and `notify2`. The native headers above must be present while
+installing the extra.
+
+At runtime, notifications also require a graphical session, a working DBus session, and an available
+desktop notification service. Check all installation and runtime conditions with:
+
+```bash
+macropad doctor
+```
+
 Without the extra, an attempted notification produces one warning and the process continues without
 further attempts. Disable notification attempts explicitly in the foreground with:
 
@@ -253,16 +265,20 @@ normally and then deactivates the layer.
 
 Layer commands begin with `^` and are handled by Macropad instead of the shell:
 
-| Command              | Behavior                                                             |
-|----------------------|----------------------------------------------------------------------|
-| `^layer <name>`      | Activates a persistent layer.                                        |
-| `^layer <name> once` | Activates a layer for the next key, with a five-second idle timeout. |
-| `^default_layer`     | Deactivates the current layer.                                       |
+| Command                   | Behavior                                                                       |
+|---------------------------|--------------------------------------------------------------------------------|
+| `^layer <name>`           | Activates a persistent layer.                                                  |
+| `^layer <name> once`      | Activates a layer for the next key, with a configurable idle timeout.         |
+| `^layer <name> momentary` | Activates a layer while its activation key is held, then restores the prior layer. |
+| `^layer <name> toggle`    | Toggles a layer on or off. Its activation key always remains an escape.       |
+| `^default_layer`          | Deactivates the current layer.                                                 |
 
 Layer references are checked after all fragments for a device are merged. This permits one fragment
 to activate a layer defined in another fragment while still rejecting genuinely missing layers.
-Active layers use only their own bindings; keys absent from the layer do not fall back to base
-bindings.
+By default, a key absent from the active layer uses its base binding. A layer binding overrides the
+base binding for that key. This changes the earlier version 1 behavior, which ignored missing layer
+keys; add `fallback: none` to preserve that behavior for a layer. A fallback binding consumes a
+one-shot layer just like a binding declared directly in that layer.
 
 Top-level layers collect all alternate bindings in one section:
 
@@ -274,12 +290,30 @@ bindings:
     up: ^layer navigation
   KEY_N:
     up: ^layer navigation once
+  KEY_M:
+    down: ^layer navigation momentary
+  KEY_T: ^layer navigation toggle
 layers:
   navigation:
+    fallback: base
     bindings:
       KEY_H: notify-send Macropad Left
       KEY_L: notify-send Macropad Right
       KEY_ESC: ^default_layer
+```
+
+Momentary commands are valid only in a binding whose sole event is `down`; multiple commands may
+still be listed under that event. Releasing the activation key restores the layer that was active
+before it was held. A later persistent, one-shot, or toggle transition supersedes that restoration.
+Momentary press/release transitions are omitted from desktop notifications to avoid noise. Other
+layer modes retain activation and deactivation notifications.
+
+Layer metadata can be declared without top-level bindings when the bindings live inline:
+
+```yaml
+layers:
+  navigation:
+    fallback: none
 ```
 
 An inline layer defines the alternate action beside a key's base action. It produces the same layer
@@ -294,13 +328,16 @@ bindings:
   KEY_H:
     up: notify-send Macropad Base
     layers:
-      navigation:
-        up: notify-send Macropad Left
+      navigation: notify-send Macropad Left
 ```
 
-Layers cannot contain nested layers. Persistent layers remain active until an action runs
-`^default_layer`. One-shot layers deactivate after the claimed key is released or the idle timeout
-passes.
+An inline command string is shorthand for `up`, matching base and top-level layer bindings. Use an
+explicit event mapping when an inline layer binding runs multiple commands.
+
+Layers cannot contain nested layers. Persistent layers remain active until replaced or an action
+runs `^default_layer`. Toggle layers deactivate when their activation key is pressed again, including
+when `fallback: none` would otherwise block that key. One-shot layers deactivate after the claimed
+key is released or the idle timeout passes.
 
 ### Profile Fragments
 

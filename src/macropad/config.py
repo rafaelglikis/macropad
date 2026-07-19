@@ -71,16 +71,21 @@ class BindingConfig:
 @dataclass(frozen=True)
 class LayerConfig:
     bindings: FrozenDict[str, BindingConfig]
+    fallback: str = 'base'
+    fallback_configured: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, 'bindings', FrozenDict(self.bindings))
 
     def to_data(self) -> dict:
-        return {
+        data = {
             'bindings': {
                 key_name: binding.to_data() for key_name, binding in self.bindings.items()
             },
         }
+        if self.fallback_configured:
+            data['fallback'] = self.fallback
+        return data
 
 
 @dataclass(frozen=True)

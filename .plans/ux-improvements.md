@@ -354,7 +354,7 @@ Verification:
 
 ### 12. Improve Layer Semantics
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Support common macropad layer workflows without duplicated bindings or fragile command
 combinations.

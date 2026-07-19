@@ -27,7 +27,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.run_command = self.action_executor.submit
 
     @staticmethod
-    def _keyboard_config(bindings, timing=None):
+    def _keyboard_config(bindings, timing=None, layers=None):
         profile_data = {
             'device': 'Test Device',
             'version': 1,
@@ -35,6 +35,8 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         }
         if timing is not None:
             profile_data['timing'] = timing
+        if layers is not None:
+            profile_data['layers'] = layers
         return profiles.validate_profile_data(profile_data).keyboard
 
     def _create_handler(self, layer_binding, timing=None):
@@ -67,6 +69,10 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
     def _advance(self, handler, seconds):
         self.clock.advance(seconds)
         handler.tick()
+
+    def _tap(self, handler, key_code):
+        handler.handle(self._event(key_code, 1))
+        handler.handle(self._event(key_code, 0))
 
     def assert_submitted_commands(self, *commands):
         self.assertEqual(
@@ -115,6 +121,236 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
             event='up',
             layer='base',
         )
+
+    def test_active_layer_falls_back_to_base_binding_by_default(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer mod',
+                    'KEY_A': 'base-command',
+                },
+                layers={'mod': {'fallback': 'base'}},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.run_command.assert_called_once_with(
+            'base-command',
+            key='KEY_A',
+            event='up',
+            layer='base',
+        )
+        self.assertEqual('mod', handler.active_layer)
+
+    def test_layer_can_disable_base_fallback(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer mod',
+                    'KEY_A': 'base-command',
+                },
+                layers={'mod': {'fallback': 'none'}},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.run_command.assert_not_called()
+        self.assertEqual('mod', handler.active_layer)
+
+    def test_base_fallback_consumes_one_shot_layer(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer mod once',
+                    'KEY_A': 'base-command',
+                },
+                layers={'mod': {'fallback': 'base'}},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('base-command')
+        self.assertIsNone(handler.active_layer)
+
+    def test_fallback_disabled_key_does_not_consume_one_shot_layer(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer mod once',
+                    'KEY_A': 'base-command',
+                },
+                layers={'mod': {'fallback': 'none'}},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.run_command.assert_not_called()
+        self.assertEqual('mod', handler.active_layer)
+
+    def test_toggle_activation_key_turns_off_fallback_disabled_layer(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_SPACE': '^layer mod toggle'},
+                layers={'mod': {'fallback': 'none'}},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        self._tap(handler, ecodes.KEY_SPACE)
+        self.assertEqual('mod', handler.active_layer)
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self.assertIsNone(handler.active_layer)
+        self.assertEqual(2, self.send_notification.call_count)
+
+    def test_momentary_layer_restores_previous_layer_without_notifications(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_P': '^layer persistent',
+                    'KEY_SPACE': {'down': '^layer mod momentary'},
+                },
+                layers={
+                    'persistent': {'fallback': 'base'},
+                    'mod': {'fallback': 'base'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_P)
+        self.send_notification.reset_mock()
+
+        handler.handle(self._event(ecodes.KEY_SPACE, 1))
+        handler.handle(self._event(ecodes.KEY_SPACE, 2))
+        self.assertEqual('mod', handler.active_layer)
+        handler.handle(self._event(ecodes.KEY_SPACE, 0))
+
+        self.assertEqual('persistent', handler.active_layer)
+        self.send_notification.assert_not_called()
+
+    def test_momentary_release_completes_previous_one_shot_claim(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer mod once',
+                    'KEY_A': {'down': '^layer navigation momentary'},
+                },
+                layers={
+                    'mod': {'fallback': 'base'},
+                    'navigation': {'fallback': 'base'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        self.assertEqual('navigation', handler.active_layer)
+        handler.handle(self._event(ecodes.KEY_A, 0))
+
+        self.assertIsNone(handler.active_layer)
+
+    def test_nested_momentary_release_skips_layer_whose_key_was_released(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_A': {'down': '^layer mod momentary'},
+                    'KEY_B': {'down': '^layer navigation momentary'},
+                },
+                layers={
+                    'mod': {
+                        'bindings': {
+                            'KEY_B': {'down': '^layer navigation momentary'},
+                        }
+                    },
+                    'navigation': {'fallback': 'base'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        handler.handle(self._event(ecodes.KEY_B, 1))
+        self.assertEqual('navigation', handler.active_layer)
+        handler.handle(self._event(ecodes.KEY_A, 0))
+        handler.handle(self._event(ecodes.KEY_B, 0))
+
+        self.assertIsNone(handler.active_layer)
+        self.send_notification.assert_not_called()
+
+    def test_later_toggle_transition_supersedes_momentary_restoration(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': {'down': '^layer mod momentary'},
+                    'KEY_T': '^layer navigation toggle',
+                },
+                layers={
+                    'mod': {
+                        'bindings': {
+                            'KEY_T': '^layer navigation toggle',
+                        }
+                    },
+                    'navigation': {'fallback': 'none'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        handler.handle(self._event(ecodes.KEY_SPACE, 1))
+        self._tap(handler, ecodes.KEY_T)
+        handler.handle(self._event(ecodes.KEY_SPACE, 0))
+
+        self.assertEqual('navigation', handler.active_layer)
+
+    def test_momentary_release_invalidates_delayed_layer_action(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_SPACE': {'down': '^layer mod momentary'}},
+                layers={
+                    'mod': {
+                        'fallback': 'none',
+                        'bindings': {
+                            'KEY_T': {
+                                'up': 'layer-command',
+                                'double_tap': 'layer-double-command',
+                            }
+                        },
+                    }
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        handler.handle(self._event(ecodes.KEY_SPACE, 1))
+        self._tap(handler, ecodes.KEY_T)
+        handler.handle(self._event(ecodes.KEY_SPACE, 0))
+        self._advance(handler, 0.3)
+
+        self.run_command.assert_not_called()
+        self.assertIsNone(handler.active_layer)
 
     def test_delayed_base_action_keeps_base_layer_context_after_layer_activation(self):
         handler = KeyboardHandler(

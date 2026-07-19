@@ -9,6 +9,7 @@
 - Integration scripts live under `tests/integration/` and are intentionally excluded from normal `unittest` discovery. Run `make test-wheel` for base/notification-extra packaging, assets, metadata, and entry points; `make test-service` for headless startup and graceful SIGTERM; and `make test-systemd` for unit rendering. `make test-wheel` creates isolated environments and needs network access plus native DBus headers for the extra-install check.
 - `make build` creates ignored artifacts under `dist/`. Do not edit or commit generated distributions.
 - CI tests Python 3.10 through 3.14, then checks lint, lockfile, wheel installation, service lifecycle, systemd rendering, and distribution artifacts.
+- Update the `Unreleased` section of `CHANGELOG.md` whenever a change affects users; keep entries concise and focused on behavior rather than implementation details.
 
 ## Runtime Architecture
 
@@ -19,6 +20,7 @@
 - `cli/monitor.py` renders device listings and key events; keep non-grabbing evdev enumeration, handle lifecycle, and reconnect behavior in `interceptor.py`.
 - `ProfileSupervisor` validates and merges the complete candidate configuration before reconciliation, then owns one worker slot per keyboard name, process lifecycle, per-device retry backoff, and bounded graceful shutdown.
 - Each child enters through `worker.run`, constructs its own `KeyboardHandler`, then runs `interceptor.listen` to grab every current `/dev/input/event*` node whose keyboard name matches the profile. Keep delayed key/layer transitions monotonic and threadless; tests use fake clocks rather than sleeps.
+- Active layers fall back to base bindings by default; `fallback: none` opts out. Momentary layers restore unsuperseded prior state without notifications, and toggle activation keys must always remain able to toggle their layer off.
 - Profiles are strict version `1` YAML. Fragments with the same device name merge before worker startup; duplicate keys, unknown fields/events/key names, and conflicts must retain source/path diagnostics.
 - Runtime profiles live outside the repository under `$XDG_CONFIG_HOME/macropad/profiles/`, defaulting to `~/.config/macropad/profiles/` with a legacy fallback. Do not change user profiles unless explicitly requested.
 - After changing module ownership, dependency direction, process lifecycle, or runtime flow under `src/macropad/`, update `src/macropad/README.md`, including its Mermaid diagrams, so the architecture documentation remains accurate.
@@ -34,4 +36,4 @@
 
 - Use `uv run macropad service install` to atomically generate, validate ownership of, enable, and start the user unit. It resolves the executable from the active environment and refuses to replace unrecognized units unless `--force` is explicit.
 - Development and released installations use the same renderer in `service_unit.py`; `make test-systemd` validates that production output. There is no checked-in unit template or separate checkout installer.
-- After runtime changes, use `uv run macropad service restart`, then verify with `uv run macropad service status` or `journalctl --user -u macropad.service`. The unit expects cooperative SIGTERM shutdown, `KillMode=mixed`, and a 10-second stop timeout.
+- After every code change, use `uv run macropad service restart` before considering the work complete, then verify with `uv run macropad service status` or `journalctl --user -u macropad.service`. The unit expects cooperative SIGTERM shutdown, `KillMode=mixed`, and a 10-second stop timeout.
