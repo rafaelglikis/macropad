@@ -197,6 +197,37 @@ class ServiceCommandTests(unittest.TestCase):
         run_service.assert_called_once_with('restart')
 
 
+class GlobalLoggingArgumentTests(unittest.TestCase):
+    def test_global_logging_arguments(self):
+        with patch('sys.argv', ['macropad', '--verbose', 'monitor']):
+            verbose_args = cli.parse_args()
+        with patch('sys.argv', ['macropad', '--debug', 'monitor']):
+            debug_args = cli.parse_args()
+        with patch('sys.argv', ['macropad', '--action-debug', 'listen']):
+            action_debug_args = cli.parse_args()
+
+        self.assertTrue(verbose_args.verbose)
+        self.assertTrue(debug_args.debug)
+        self.assertTrue(action_debug_args.action_debug)
+
+    def test_action_debug_enables_debug_logging(self):
+        args = SimpleNamespace(
+            subcommand='validate',
+            verbose=False,
+            debug=False,
+            action_debug=True,
+        )
+
+        with (
+            patch('macropad.cli.configure_logging') as configure_logging,
+            patch('macropad.cli.parse_args', return_value=args),
+            patch('macropad.cli.validate.run', return_value=0),
+        ):
+            cli.main()
+
+        configure_logging.assert_called_once_with(verbose=False, debug=True)
+
+
 class SupervisionCycleTests(unittest.TestCase):
     def test_supervisor_ticks_without_watchdog_events(self):
         profile_supervisor = SimpleNamespace(tick=Mock())
@@ -281,7 +312,7 @@ class ShutdownSignalTests(unittest.TestCase):
 
         self.assertEqual(0, exit_status)
         run_validate.assert_called_once_with(args)
-        configure_logging.assert_called_once_with()
+        configure_logging.assert_called_once_with(verbose=False, debug=False)
         install_shutdown.assert_not_called()
 
 
@@ -430,6 +461,7 @@ class MainExitStatusTests(unittest.TestCase):
             profile_paths=['/profiles/macros.yml'],
             profile_directories=None,
             watch=False,
+            action_debug=True,
         )
         shutdown_requested = Mock()
         shutdown_requested.wait.return_value = True
@@ -443,6 +475,11 @@ class MainExitStatusTests(unittest.TestCase):
             exit_status = listen.run(args)
 
         self.assertEqual(0, exit_status)
+        supervisor_type.assert_called_once_with(
+            action_debug=True,
+            verbose=False,
+            debug=False,
+        )
         supervisor_type.return_value.shutdown.assert_called_once_with()
 
     def test_unexpected_os_error_returns_failure(self):

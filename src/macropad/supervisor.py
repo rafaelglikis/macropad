@@ -41,11 +41,17 @@ class ProfileSupervisor:
         device_present=None,
         clock=None,
         shutdown_event_factory=None,
+        action_debug=False,
+        verbose=False,
+        debug=False,
     ):
         self._process_factory = process_factory or multiprocessing.Process
         self._device_present = device_present or interceptor.has_device
         self._clock = clock or time.monotonic
         self._shutdown_event_factory = shutdown_event_factory or multiprocessing.Event
+        self.action_debug = action_debug
+        self.verbose = verbose
+        self.debug = debug
         self.workers: dict[str, Worker] = {}
 
     def start(self, profile_paths: list[str]) -> None:
@@ -151,7 +157,13 @@ class ProfileSupervisor:
         worker.shutdown_event.clear()
         process = self._process_factory(
             target=worker_runtime.run,
-            args=(prepared_profile.config, worker.shutdown_event),
+            args=(
+                prepared_profile.config,
+                worker.shutdown_event,
+                self.action_debug,
+                self.verbose,
+                self.debug,
+            ),
         )
         started = False
         try:

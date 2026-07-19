@@ -131,6 +131,41 @@ class ProfileSupervisorTests(unittest.TestCase):
         self.assertTrue(process.is_alive())
         self.assertIs(supervisor.worker_runtime.run, process.target)
         self.assertIs(prepared_profile.config, process.args[0])
+        self.assertFalse(process.args[2])
+        self.assertFalse(process.args[3])
+        self.assertFalse(process.args[4])
+
+    def test_action_debug_is_forwarded_to_worker_process(self):
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            action_debug=True,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+
+        process = profile_supervisor.workers['Macro Keyboard'].process
+        self.assertTrue(process.args[2])
+
+    def test_logging_options_are_forwarded_to_worker_process(self):
+        profile_supervisor = supervisor.ProfileSupervisor(
+            process_factory=FakeProcess,
+            device_present=lambda device_name: False,
+            shutdown_event_factory=FakeEvent,
+            verbose=True,
+            debug=True,
+        )
+        prepared_profile = self._prepared_profile()
+
+        with patch('macropad.supervisor.prepare_profiles', return_value=[prepared_profile]):
+            profile_supervisor.start(['/profiles/macros.yml'])
+
+        process = profile_supervisor.workers['Macro Keyboard'].process
+        self.assertTrue(process.args[3])
+        self.assertTrue(process.args[4])
 
     def test_invalid_candidate_keeps_current_worker_running(self):
         profile_supervisor = self._create_supervisor()

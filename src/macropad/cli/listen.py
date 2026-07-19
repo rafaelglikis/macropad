@@ -76,7 +76,11 @@ def run(args: argparse.Namespace) -> int:
     observer = None
     reload_requests = queue.SimpleQueue()
     reload_scheduler = profile_watcher.ProfileReloadScheduler()
-    profile_supervisor = ProfileSupervisor()
+    profile_supervisor = ProfileSupervisor(
+        action_debug=getattr(args, 'action_debug', False),
+        verbose=getattr(args, 'verbose', False),
+        debug=getattr(args, 'debug', False),
+    )
     shutdown_requested = threading.Event()
     install_shutdown_handler(shutdown_requested)
     notifications.initialize()

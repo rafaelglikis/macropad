@@ -133,6 +133,7 @@ class KeyboardHandler:
                 'actions resolved for input event',
                 extra=self._context(key=code, event=event_value),
             )
+            resolved_layer = 'base' if layer_generation is None else self.active_layer
             for command in binding.actions[event_value]:
                 if command.startswith('^'):
                     self.execute_handler_command(command[1:], code)
@@ -143,9 +144,15 @@ class KeyboardHandler:
                             key=code,
                             event=event_value,
                             command=command,
+                            layer=resolved_layer,
                         ),
                     )
-                    self.action_executor.submit(command)
+                    self.action_executor.submit(
+                        command,
+                        key=code,
+                        event=event_value,
+                        layer=resolved_layer,
+                    )
         finally:
             self._finish_one_shot_layer(event, code, layer_generation)
 

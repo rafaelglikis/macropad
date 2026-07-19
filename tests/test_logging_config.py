@@ -1,7 +1,8 @@
 import logging
 import unittest
+from unittest.mock import patch
 
-from macropad.logging_config import ContextFormatter
+from macropad.logging_config import ContextFormatter, configure_logging
 
 
 class ContextFormatterTests(unittest.TestCase):
@@ -44,6 +45,26 @@ class ContextFormatterTests(unittest.TestCase):
             'INFO macropad.cli profile watch mode enabled',
             formatter.format(record),
         )
+
+
+class LoggingConfigurationTests(unittest.TestCase):
+    def test_default_logging_shows_warnings(self):
+        with patch('macropad.logging_config.logging.basicConfig') as basic_config:
+            configure_logging()
+
+        self.assertEqual(logging.WARNING, basic_config.call_args.kwargs['level'])
+
+    def test_verbose_logging_shows_information(self):
+        with patch('macropad.logging_config.logging.basicConfig') as basic_config:
+            configure_logging(verbose=True)
+
+        self.assertEqual(logging.INFO, basic_config.call_args.kwargs['level'])
+
+    def test_debug_logging_takes_precedence(self):
+        with patch('macropad.logging_config.logging.basicConfig') as basic_config:
+            configure_logging(verbose=True, debug=True)
+
+        self.assertEqual(logging.DEBUG, basic_config.call_args.kwargs['level'])
 
 
 if __name__ == '__main__':

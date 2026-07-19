@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 from evdev import InputEvent, ecodes
 
@@ -66,6 +66,12 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.clock.advance(seconds)
         handler.tick()
 
+    def assert_submitted_commands(self, *commands):
+        self.assertEqual(
+            list(commands),
+            [submission.args[0] for submission in self.run_command.call_args_list],
+        )
+
     def test_one_shot_up_binding_stays_active_until_key_release(self):
         handler = self._create_handler({'up': ['layer-command-1', 'layer-command-2']})
         self._activate_layer(handler)
@@ -77,10 +83,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         handler.handle(self._event(ecodes.KEY_T, 0))
 
-        self.assertEqual(
-            [call('layer-command-1'), call('layer-command-2')],
-            self.run_command.call_args_list,
-        )
+        self.assert_submitted_commands('layer-command-1', 'layer-command-2')
         self.assertIsNone(handler.active_layer)
 
     def test_action_submission_logs_device_key_and_event_context(self):
@@ -100,10 +103,47 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                 'key': 'KEY_A',
                 'event': 'up',
                 'command': 'a-command',
+                'layer': 'base',
                 'device': 'Test Device',
             },
         )
-        self.run_command.assert_called_once_with('a-command')
+        self.run_command.assert_called_once_with(
+            'a-command',
+            key='KEY_A',
+            event='up',
+            layer='base',
+        )
+
+    def test_delayed_base_action_keeps_base_layer_context_after_layer_activation(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_A': {
+                        'up': 'a-command',
+                        'double_tap': 'double-a-command',
+                    },
+                    'KEY_SPACE': {'up': '^layer mod'},
+                    'KEY_T': {
+                        'up': 'base-command',
+                        'layers': {'mod': {'up': 'layer-command'}},
+                    },
+                }
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        handler.handle(self._event(ecodes.KEY_A, 0))
+
+        handler.activate_layer('mod', 'KEY_SPACE')
+        self._advance(handler, 0.3)
+
+        self.run_command.assert_called_once_with(
+            'a-command',
+            key='KEY_A',
+            event='up',
+            layer='base',
+        )
 
     def test_one_shot_down_binding_does_not_fall_through_on_release(self):
         handler = self._create_handler({'down': 'layer-command'})
@@ -111,12 +151,12 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         handler.handle(self._event(ecodes.KEY_T, 1))
 
-        self.run_command.assert_called_once_with('layer-command')
+        self.assert_submitted_commands('layer-command')
         self.assertEqual('mod', handler.active_layer)
 
         handler.handle(self._event(ecodes.KEY_T, 0))
 
-        self.run_command.assert_called_once_with('layer-command')
+        self.assert_submitted_commands('layer-command')
         self.assertIsNone(handler.active_layer)
 
     def test_stale_debounced_event_does_not_affect_reactivated_layer(self):
@@ -170,7 +210,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_T, 0))
         self._advance(handler, 0.3)
 
-        self.run_command.assert_called_once_with('layer-hold-command')
+        self.assert_submitted_commands('layer-hold-command')
         self.assertIsNone(handler.active_layer)
 
     def test_one_shot_layer_supports_debounced_double_tap(self):
@@ -188,7 +228,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_T, 0))
         self._advance(handler, 0.3)
 
-        self.run_command.assert_called_once_with('layer-double-tap-command')
+        self.assert_submitted_commands('layer-double-tap-command')
         self.assertIsNone(handler.active_layer)
 
     def test_one_shot_layer_supports_double_tap_only_binding(self):
@@ -209,7 +249,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         self._advance(handler, 0.3)
 
-        self.run_command.assert_called_once_with('layer-double-tap-command')
+        self.assert_submitted_commands('layer-double-tap-command')
         self.assertIsNone(handler.active_layer)
 
     def test_one_shot_layer_supports_triple_tap_only_binding(self):
@@ -229,7 +269,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         self._advance(handler, 0.3)
 
-        self.run_command.assert_called_once_with('layer-triple-tap-command')
+        self.assert_submitted_commands('layer-triple-tap-command')
         self.assertIsNone(handler.active_layer)
 
     def test_one_shot_timeout_is_cancelled_while_key_is_in_progress(self):
@@ -243,7 +283,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         handler.handle(self._event(ecodes.KEY_T, 0))
 
-        self.run_command.assert_called_once_with('layer-command')
+        self.assert_submitted_commands('layer-command')
         self.assertIsNone(handler.active_layer)
 
     def test_debounce_is_independent_for_each_key(self):
@@ -273,8 +313,8 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self._advance(handler, 0.3)
 
         self.assertCountEqual(
-            [call('a-command'), call('b-command')],
-            self.run_command.call_args_list,
+            ['a-command', 'b-command'],
+            [submission.args[0] for submission in self.run_command.call_args_list],
         )
 
     def test_debounce_deadline_moves_to_latest_event(self):
@@ -299,7 +339,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.run_command.assert_not_called()
 
         self._advance(handler, 0.11)
-        self.run_command.assert_called_once_with('a-command')
+        self.assert_submitted_commands('a-command')
 
     def test_tap_history_is_independent_for_each_key(self):
         handler = KeyboardHandler(
@@ -327,8 +367,8 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self._advance(handler, 0.3)
 
         self.assertCountEqual(
-            [call('a-double-tap-command'), call('b-double-tap-command')],
-            self.run_command.call_args_list,
+            ['a-double-tap-command', 'b-double-tap-command'],
+            [submission.args[0] for submission in self.run_command.call_args_list],
         )
 
     def test_down_only_binding_repeats_for_key_hold_events(self):
@@ -343,10 +383,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_A, 2))
         handler.handle(self._event(ecodes.KEY_A, 0))
 
-        self.assertEqual(
-            [call('repeat-command')] * 3,
-            self.run_command.call_args_list,
-        )
+        self.assert_submitted_commands(*(['repeat-command'] * 3))
 
     def test_hold_binding_fires_once_without_corrupting_next_tap(self):
         handler = KeyboardHandler(
@@ -368,16 +405,13 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         handler.handle(self._event(ecodes.KEY_A, 0))
         self._advance(handler, 0.3)
 
-        self.run_command.assert_called_once_with('hold-command')
+        self.assert_submitted_commands('hold-command')
 
         handler.handle(self._event(ecodes.KEY_A, 1))
         handler.handle(self._event(ecodes.KEY_A, 0))
         self._advance(handler, 0.3)
 
-        self.assertEqual(
-            [call('hold-command'), call('up-command')],
-            self.run_command.call_args_list,
-        )
+        self.assert_submitted_commands('hold-command', 'up-command')
 
 
 if __name__ == '__main__':

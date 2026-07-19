@@ -37,6 +37,10 @@ class SystemdUnitRendererTests(unittest.TestCase):
             '/usr/local/sbin:/usr/sbin:/sbin',
             rendered,
         )
+        self.assertIn(
+            'ExecStart="/tmp/macropad/.venv/bin/macropad" --verbose listen --watch',
+            rendered,
+        )
 
 
 if __name__ == '__main__':

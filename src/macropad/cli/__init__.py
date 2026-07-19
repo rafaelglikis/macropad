@@ -13,6 +13,22 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Turn every keyboard into a Macropad')
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Show lifecycle and action summary logs.',
+    )
+    verbosity.add_argument(
+        '--debug',
+        action='store_true',
+        help='Show detailed input, layer, and action logs.',
+    )
+    parser.add_argument(
+        '--action-debug',
+        action='store_true',
+        help='Enable debug logs and inherit action stdout/stderr.',
+    )
     subparsers = parser.add_subparsers(title='Subcommands', dest='subcommand', required=True)
 
     validate_subparser = subparsers.add_parser(
@@ -101,9 +117,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    configure_logging()
+    args = parse_args()
+    configure_logging(
+        verbose=getattr(args, 'verbose', False),
+        debug=getattr(args, 'debug', False) or getattr(args, 'action_debug', False),
+    )
     try:
-        args = parse_args()
         if args.subcommand == 'doctor':
             return doctor.run()
         if args.subcommand == 'init':

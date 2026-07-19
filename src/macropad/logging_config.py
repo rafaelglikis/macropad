@@ -16,6 +16,11 @@ CONTEXT_FIELDS = (
     'limit',
     'layer',
     'mode',
+    'cwd',
+    'action_path',
+    'display',
+    'wayland_display',
+    'session_bus',
     'error',
 )
 
@@ -31,7 +36,13 @@ class ContextFormatter(logging.Formatter):
         return f'{message} {context}' if context else message
 
 
-def configure_logging() -> None:
+def configure_logging(verbose: bool = False, debug: bool = False) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(ContextFormatter('%(levelname)s %(name)s %(message)s'))
-    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    if debug:
+        level = logging.DEBUG
+    elif verbose:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+    logging.basicConfig(level=level, handlers=[handler], force=True)

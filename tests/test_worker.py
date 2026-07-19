@@ -24,16 +24,31 @@ class WorkerTests(unittest.TestCase):
         profile_config = SimpleNamespace(device='Macro Keyboard', keyboard=object())
         shutdown_event = Mock()
         handler = Mock()
+        action_executor = Mock()
 
         with (
+            patch('macropad.worker.configure_logging') as configure_logging,
             patch('macropad.worker.install_shutdown_handler') as install_shutdown_handler,
+            patch('macropad.worker.ActionExecutor', return_value=action_executor) as executor_type,
             patch('macropad.worker.KeyboardHandler', return_value=handler) as handler_type,
             patch('macropad.worker.interceptor.listen') as listen,
         ):
-            worker.run(profile_config, shutdown_event)
+            worker.run(
+                profile_config,
+                shutdown_event,
+                action_debug=True,
+                verbose=True,
+                debug=False,
+            )
 
+        configure_logging.assert_called_once_with(verbose=True, debug=True)
         install_shutdown_handler.assert_called_once_with(shutdown_event)
-        handler_type.assert_called_once_with(profile_config.keyboard, device='Macro Keyboard')
+        executor_type.assert_called_once_with(device='Macro Keyboard', debug_output=True)
+        handler_type.assert_called_once_with(
+            profile_config.keyboard,
+            action_executor=action_executor,
+            device='Macro Keyboard',
+        )
         listen.assert_called_once_with('Macro Keyboard', handler, shutdown_event)
         handler.shutdown.assert_called_once_with()
 
@@ -42,6 +57,7 @@ class WorkerTests(unittest.TestCase):
         handler = Mock()
 
         with (
+            patch('macropad.worker.configure_logging'),
             patch('macropad.worker.install_shutdown_handler'),
             patch('macropad.worker.KeyboardHandler', return_value=handler),
             patch(

@@ -38,6 +38,8 @@ Listen using profiles from the default configuration directory:
 
 ```bash
 uv run macropad listen
+uv run macropad --verbose listen
+uv run macropad --debug listen
 ```
 
 Validate profiles without opening or grabbing input devices:
@@ -218,13 +220,48 @@ loaded and merged once. An invalid edit is reported while the last valid workers
 
 Profile actions are trusted shell code and must never be loaded from an untrusted source. Each
 command runs with `shell=True`, starts from `/`, inherits the Macropad process environment, receives
-no stdin, and has stdout and stderr discarded. Actions are detached and continue across profile
-reloads or worker shutdown.
+no stdin, and normally has stdout and stderr discarded. Actions are detached and continue across
+profile reloads or worker shutdown.
 
 Each keyboard worker tracks at most eight concurrent actions. Additional actions are dropped rather
 than queued until an earlier action exits. The systemd user service includes `~/bin`, `~/.local/bin`,
 and standard system command directories in its deterministic `PATH`. Use absolute paths or a service
 override for commands installed in other interactive-shell or tool-manager directories.
+
+### Runtime And Action Debugging
+
+Global logging options precede the subcommand and work with both `macropad` and
+`python -m macropad`:
+
+```bash
+macropad --verbose listen
+python -m macropad --debug listen
+macropad --action-debug listen
+```
+
+Normal mode shows warnings and errors, including failed action starts, nonzero exits, worker
+failures, and actions dropped at the concurrency limit. `--verbose` adds lifecycle summaries,
+resolved action submissions, process starts, successful exits, layer transitions, and profile
+reloads. `--debug` also shows unbound input, event resolution, active binding selection, and the
+action execution environment.
+
+Action diagnostics identify the resolved device, `KEY_*` name, event, base or named layer, command,
+process ID, exit status, and concurrency count where applicable. Debug environment output includes
+the `/` working directory, action `PATH`, display names, whether a DBus session address is set, and
+whether output is discarded or inherited. It intentionally does not dump the complete environment
+or the DBus address.
+
+`--action-debug` implies debug logging and changes only action stdout and stderr: they inherit the
+Macropad process streams instead of `/dev/null`. In a foreground listener they appear in that
+terminal; when configured on the systemd service command they go to the journal. This output can
+contain credentials or other sensitive application data, so enable it only while diagnosing a
+trusted action. Stdin remains `/dev/null`, actions remain detached, and the eight-action limit is
+unchanged.
+
+The checked-in service uses `--verbose` so lifecycle and action summaries remain available through
+`macropad service logs`. To capture action output in the journal, add `--action-debug` before
+`listen` in the service's effective `ExecStart`, reload the unit, and restart the service. Remove it
+after debugging.
 
 ### Validation
 

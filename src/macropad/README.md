@@ -31,7 +31,7 @@ dependency direction, process lifecycle, or the profile and event flows change.
 | `handlers.py`          | Resolves key events, tap and hold sequences, layers, and internal handler commands into action submissions.                            |
 | `actions.py`           | Starts trusted shell actions as detached processes and enforces the per-worker concurrency limit.                                      |
 | `notifications.py`     | Initializes optional desktop notifications and sends notifications without making them a runtime requirement.                          |
-| `logging_config.py`    | Configures structured console logging and renders known context fields consistently.                                                   |
+| `logging_config.py`    | Selects normal, verbose, or debug levels and renders structured context fields consistently.                                           |
 | `assets/`              | Contains package resources, currently the desktop notification icon.                                                                   |
 
 ## Dependency Diagram
@@ -82,6 +82,7 @@ flowchart TD
 
     Worker --> Handler[handlers.py]
     Worker --> Interceptor
+    Worker --> Actions
 
     Handler --> Config
     Handler --> Actions[actions.py]
@@ -112,26 +113,30 @@ The CLI runs in the parent process. `ProfileSupervisor` maintains one worker slo
 keyboard name. Each slot has its own `multiprocessing.Process`, shutdown event, restart counters, and
 retry deadline.
 
-Only immutable `ProfileConfig` data crosses the process boundary. The parent does not construct a
-`KeyboardHandler` or `ActionExecutor`. The child enters through `worker.run()`, installs its SIGTERM
-handler, constructs its handler, and then enters the interception loop. This keeps mutable resources
-owned by the process that uses them and avoids requiring runtime objects to be serialized.
+Only immutable `ProfileConfig` data and logging option booleans cross the process boundary. The
+parent does not construct a `KeyboardHandler` or `ActionExecutor`. The child enters through
+`worker.run()`, configures its own logging so non-fork start methods behave consistently, installs its
+SIGTERM handler, constructs the executor and handler, and then enters the interception loop. This
+keeps mutable resources owned by the process that uses them and avoids requiring runtime objects to
+be serialized.
 
 The project is Linux-only. Device identity is the evdev keyboard name, and one worker attaches to all
 current `/dev/input/event*` nodes with that name.
 
 ## Startup Flow
 
-1. `cli.main()` configures logging, parses arguments, and dispatches to the focused `doctor`, `init`,
-   `listen`, `monitor`, `validate`, or `service` command module.
+1. `cli.main()` parses global logging options, configures normal, verbose, or debug logging, and
+   dispatches to the focused `doctor`, `init`, `listen`, `monitor`, `validate`, or `service` command
+   module.
 2. `cli.listen.run()` initializes optional notifications and installs the parent SIGTERM handler.
 3. `cli.profile_files` resolves explicit profile paths and all `.yml` files in requested profile
    directories.
 4. `ProfileSupervisor.start()` calls `prepare_profiles()` before starting any process.
 5. Every YAML file is loaded and validated before fragments are merged by keyboard name.
 6. The supervisor creates one worker slot per merged `ProfileConfig` and starts `worker.run()` in a
-   child process.
-7. The worker constructs `KeyboardHandler` and calls `interceptor.listen()`.
+   child process, forwarding logging level and action-output options.
+7. The worker configures logging, constructs `ActionExecutor` and `KeyboardHandler`, then calls
+   `interceptor.listen()`.
 8. The interceptor waits for matching devices, opens and grabs every matching event node, and begins
    forwarding input events.
 
@@ -194,8 +199,16 @@ triple-tap resolution use monotonic deadlines and are advanced by `KeyboardHandl
 listener thread. Layer timeouts use the same threadless mechanism.
 
 Actions are trusted shell strings. Each worker may have at most eight active actions; additional
-actions are dropped rather than queued. Action processes are detached and are not terminated when a
-worker reloads or stops.
+actions are dropped rather than queued and logged with the active count and limit. Action processes
+are detached and are not terminated when a worker reloads or stops. Normal mode routes stdout and
+stderr to `/dev/null`; action-debug mode inherits the worker streams so foreground output remains in
+the terminal and service output reaches the journal.
+
+The handler passes resolved device, key, event, and base or named layer context into each submission.
+The executor retains that trigger context through command start, process ID, exit status, and
+concurrency rejection records, including when identical commands run concurrently. Debug startup
+logging reports only the action working directory, `PATH`, display names, DBus presence, and output
+mode rather than dumping the full environment or DBus address.
 
 The checked-in systemd user unit gives actions a deterministic `PATH` containing `~/bin`,
 `~/.local/bin`, and standard system command directories. It intentionally does not start Macropad
@@ -322,6 +335,8 @@ source names and field paths in every validation error because reload diagnostic
   in `interceptor.py`.
 - Add argument parsing and dispatch in `cli/__init__.py`, and command-specific orchestration in a
   focused module under `cli/`.
+- Add global logging level behavior in `logging_config.py` and pass action-output policy through the
+  supervisor to the worker-owned `ActionExecutor`.
 - Add validation workflow or report behavior in `validation.py`, keeping schema and merge rules in
   `profiles.py`.
 - Keep operating-system adapters optional or failure-tolerant where the service can continue without

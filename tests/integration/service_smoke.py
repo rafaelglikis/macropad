@@ -68,6 +68,7 @@ def main() -> None:
         process = subprocess.Popen(
             [
                 str(PROJECT_ROOT / '.venv/bin/macropad'),
+                '--verbose',
                 'listen',
                 '--watch',
                 '--directory',
