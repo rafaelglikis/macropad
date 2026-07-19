@@ -7,6 +7,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-19
+
 ### Added
 
 - Added optional profile timing settings for multi-tap resolution and one-shot layer timeouts.
@@ -50,5 +52,6 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Published the `poor-mans-macropad` distribution to PyPI with `macropad` console and module entry
   points, MIT licensing, release automation, and artifact verification.
 
-[Unreleased]: https://github.com/rafaelglikis/macropad/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rafaelglikis/macropad/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rafaelglikis/macropad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rafaelglikis/macropad/releases/tag/v0.1.0
