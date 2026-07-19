@@ -213,7 +213,7 @@ def check_executable() -> DiagnosticResult:
         INFO,
         'Executable',
         'macropad is not available on PATH outside the current invocation.',
-        'Run make install-editable when a user-level command is needed.',
+        'Install the tool with uv tool install poor-mans-macropad.',
     )
 
 
@@ -229,7 +229,7 @@ def check_service(
         INFO,
         'User service',
         error or 'The macropad systemd user service is not installed.',
-        'Run make systemd to install the development-checkout service.',
+        'Run macropad service install.',
     )
 
 

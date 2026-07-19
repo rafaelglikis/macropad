@@ -1,8 +1,10 @@
+import os
 import socket
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from macropad import runtime_status
 
@@ -38,23 +40,68 @@ class RuntimeStatusTests(unittest.TestCase):
             self.assertEqual(snapshot, result['status'])
             self.assertFalse(socket_path.exists())
 
+    def test_close_releases_resources_when_socket_unlink_fails(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            socket_path = Path(temp_directory) / 'runtime/status.sock'
+            server = runtime_status.RuntimeStatusServer(socket_path)
+            server_socket = server._socket
+            lock_file = server._lock_file
+
+            with (
+                patch(
+                    'macropad.runtime_status._unlink_socket_if_same',
+                    side_effect=OSError('unlink failed'),
+                ),
+                self.assertLogs('macropad.runtime_status', level='WARNING'),
+            ):
+                server.close()
+
+            self.assertEqual(-1, server_socket.fileno())
+            self.assertTrue(lock_file.closed)
+            self.assertIsNone(server._socket)
+            self.assertIsNone(server._socket_path_descriptor)
+            self.assertFalse(server._thread.is_alive())
+
+    def test_initialization_failure_preserves_error_and_closes_lock(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            socket_path = Path(temp_directory) / 'runtime/status.sock'
+            lock_file = Mock()
+
+            with (
+                patch('macropad.runtime_status._acquire_runtime_lock', return_value=lock_file),
+                patch(
+                    'macropad.runtime_status.threading.Thread.start',
+                    side_effect=RuntimeError('thread start failed'),
+                ),
+                patch(
+                    'macropad.runtime_status._unlink_socket_if_same',
+                    side_effect=OSError('unlink failed'),
+                ),
+                self.assertLogs('macropad.runtime_status', level='WARNING'),
+                self.assertRaisesRegex(RuntimeError, 'thread start failed'),
+            ):
+                runtime_status.RuntimeStatusServer(socket_path)
+
+            lock_file.close.assert_called_once_with()
+
     def test_inode_checked_cleanup_does_not_remove_replacement_socket(self):
         with tempfile.TemporaryDirectory() as temp_directory:
             socket_path = Path(temp_directory) / 'status.sock'
             stale_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             stale_socket.bind(str(socket_path))
-            stale_stat = socket_path.lstat()
+            stale_descriptor = runtime_status._open_socket_path(socket_path)
             stale_socket.close()
             socket_path.unlink()
 
             replacement_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             replacement_socket.bind(str(socket_path))
             try:
-                removed = runtime_status._unlink_socket_if_same(socket_path, stale_stat)
+                removed = runtime_status._unlink_socket_if_same(socket_path, stale_descriptor)
 
                 self.assertFalse(removed)
                 self.assertTrue(socket_path.exists())
             finally:
+                os.close(stale_descriptor)
                 replacement_socket.close()
                 socket_path.unlink(missing_ok=True)
 

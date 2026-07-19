@@ -1,7 +1,12 @@
+import io
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
+from macropad import service_unit
 from macropad.cli import service
 
 
@@ -70,6 +75,115 @@ class ServiceCommandTests(unittest.TestCase):
             ['journalctl', '--user', '-u', 'macropad.service', '-f'],
             check=False,
         )
+
+    def test_install_writes_unit_reloads_and_enables_now(self):
+        executable = Path('/tools/macropad/bin/macropad')
+        unit_path = Path('/home/demo/.config/systemd/user/macropad.service')
+
+        with (
+            patch('macropad.cli.service.service_unit.resolve_executable', return_value=executable),
+            patch('macropad.cli.service.service_unit.resolve_unit_path', return_value=unit_path),
+            patch(
+                'macropad.cli.service.get_info',
+                return_value=service.ServiceInfo(None, False),
+            ),
+            patch('macropad.cli.service.service_unit.install_unit') as install_unit,
+            patch('macropad.cli.service._run_systemctl', side_effect=[0, 0, 0]) as run_systemctl,
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_status = service.run('install', force=True)
+
+        self.assertEqual(0, exit_status)
+        install_unit.assert_called_once_with(
+            unit_path,
+            service_unit.render_unit(executable),
+            force=True,
+        )
+        self.assertEqual(
+            [
+                call('daemon-reload'),
+                call('enable', service.SERVICE_NAME),
+                call('start', service.SERVICE_NAME),
+            ],
+            run_systemctl.call_args_list,
+        )
+
+    def test_install_refuses_unrecognized_unit_loaded_from_another_path(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            loaded_path = Path(temp_directory) / 'system/macropad.service'
+            loaded_path.parent.mkdir()
+            loaded_path.write_text('[Unit]\nDescription=Unrelated\n', encoding='utf-8')
+            unit_path = Path(temp_directory) / 'user/macropad.service'
+
+            with (
+                patch(
+                    'macropad.cli.service.service_unit.resolve_executable',
+                    return_value=Path('/tools/macropad/bin/macropad'),
+                ),
+                patch(
+                    'macropad.cli.service.service_unit.resolve_unit_path', return_value=unit_path
+                ),
+                patch(
+                    'macropad.cli.service.get_info',
+                    return_value=service.ServiceInfo(str(loaded_path), False),
+                ),
+                patch('macropad.cli.service.service_unit.install_unit') as install_unit,
+                patch('macropad.cli.service._run_systemctl') as run_systemctl,
+                redirect_stdout(io.StringIO()),
+            ):
+                exit_status = service.run('install')
+
+        self.assertEqual(1, exit_status)
+        install_unit.assert_not_called()
+        run_systemctl.assert_not_called()
+
+    def test_uninstall_disables_before_removing_generated_unit(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            unit_path = Path(temp_directory) / 'macropad.service'
+            unit_path.write_text(
+                f'{service_unit.GENERATED_MARKER}\nunit',
+                encoding='utf-8',
+            )
+
+            with (
+                patch(
+                    'macropad.cli.service.service_unit.resolve_unit_path', return_value=unit_path
+                ),
+                patch(
+                    'macropad.cli.service._run_systemctl', side_effect=[0, 0, 0]
+                ) as run_systemctl,
+                redirect_stdout(io.StringIO()),
+            ):
+                exit_status = service.run('uninstall')
+
+            self.assertEqual(0, exit_status)
+            self.assertFalse(unit_path.exists())
+            self.assertEqual(
+                [
+                    call('stop', service.SERVICE_NAME),
+                    call('disable', service.SERVICE_NAME),
+                    call('daemon-reload'),
+                ],
+                run_systemctl.call_args_list,
+            )
+
+    def test_uninstall_refuses_unknown_unit_without_stopping_it(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            unit_path = Path(temp_directory) / 'macropad.service'
+            unit_path.write_text('[Unit]\nDescription=Custom\n', encoding='utf-8')
+
+            with (
+                patch(
+                    'macropad.cli.service.service_unit.resolve_unit_path', return_value=unit_path
+                ),
+                patch('macropad.cli.service._run_systemctl') as run_systemctl,
+                redirect_stdout(io.StringIO()),
+            ):
+                exit_status = service.run('uninstall')
+
+            self.assertEqual(1, exit_status)
+            self.assertTrue(unit_path.exists())
+            run_systemctl.assert_not_called()
 
     def test_unknown_action_is_rejected_without_starting_process(self):
         with (

@@ -1,4 +1,5 @@
 import errno
+import io
 import pathlib
 import queue
 import runpy
@@ -6,10 +7,11 @@ import signal
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-from macropad import cli, profile_watcher
+from macropad import __version__, cli, profile_watcher
 from macropad.cli import listen, profile_files
 from macropad.cli import validate as validate_command
 
@@ -185,6 +187,13 @@ class ServiceCommandTests(unittest.TestCase):
                 self.assertEqual('service', args.subcommand)
                 self.assertEqual(action, args.service_action)
 
+    def test_service_install_accepts_force(self):
+        with patch('sys.argv', ['macropad', 'service', 'install', '--force']):
+            args = cli.parse_args()
+
+        self.assertEqual('install', args.service_action)
+        self.assertTrue(args.force)
+
     def test_main_dispatches_service_action(self):
         args = SimpleNamespace(subcommand='service', service_action='restart')
 
@@ -196,10 +205,23 @@ class ServiceCommandTests(unittest.TestCase):
             exit_status = cli.main()
 
         self.assertEqual(7, exit_status)
-        run_service.assert_called_once_with('restart')
+        run_service.assert_called_once_with('restart', force=False)
 
 
 class GlobalLoggingArgumentTests(unittest.TestCase):
+    def test_version_is_available_without_a_subcommand(self):
+        output = io.StringIO()
+
+        with (
+            patch('sys.argv', ['macropad', '--version']),
+            redirect_stdout(output),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            cli.parse_args()
+
+        self.assertEqual(0, raised.exception.code)
+        self.assertEqual(f'macropad {__version__}\n', output.getvalue())
+
     def test_global_logging_arguments(self):
         with patch('sys.argv', ['macropad', '--verbose', 'monitor']):
             verbose_args = cli.parse_args()

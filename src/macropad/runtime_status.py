@@ -1,6 +1,7 @@
 import errno
 import fcntl
 import json
+import logging
 import os
 import socket
 import stat
@@ -12,6 +13,8 @@ from pathlib import Path
 SOCKET_NAME = 'status.sock'
 LOCK_NAME = 'status.lock'
 MAX_RESPONSE_BYTES = 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeStatusUnavailable(ConnectionError):
@@ -71,7 +74,12 @@ def _acquire_runtime_lock(path: Path):
     return os.fdopen(descriptor, 'r+b')
 
 
-def _unlink_socket_if_same(path: Path, expected_stat) -> bool:
+def _open_socket_path(path: Path) -> int:
+    return os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+
+
+def _unlink_socket_if_same(path: Path, expected_descriptor: int) -> bool:
+    expected_stat = os.fstat(expected_descriptor)
     try:
         current_stat = path.lstat()
     except FileNotFoundError:
@@ -88,27 +96,31 @@ def _unlink_socket_if_same(path: Path, expected_stat) -> bool:
 
 def _remove_stale_socket(path: Path) -> None:
     try:
-        path_stat = path.lstat()
+        path_descriptor = _open_socket_path(path)
     except FileNotFoundError:
         return
-    if not stat.S_ISSOCK(path_stat.st_mode):
-        raise RuntimeError(f'runtime status path is not a socket: {path}')
-
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        probe.settimeout(0.2)
-        probe.connect(str(path))
-    except OSError as error:
-        if error.errno not in (errno.ECONNREFUSED, errno.ENOENT):
-            raise RuntimeError(
-                f'could not inspect runtime status socket {path}: {error}'
-            ) from error
-    else:
-        raise RuntimeError('another Macropad listener is already running')
+        path_stat = os.fstat(path_descriptor)
+        if not stat.S_ISSOCK(path_stat.st_mode):
+            raise RuntimeError(f'runtime status path is not a socket: {path}')
+
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(str(path))
+        except OSError as error:
+            if error.errno not in (errno.ECONNREFUSED, errno.ENOENT):
+                raise RuntimeError(
+                    f'could not inspect runtime status socket {path}: {error}'
+                ) from error
+        else:
+            raise RuntimeError('another Macropad listener is already running')
+        finally:
+            probe.close()
+        if not _unlink_socket_if_same(path, path_descriptor):
+            raise RuntimeError(f'runtime status socket changed during stale cleanup: {path}')
     finally:
-        probe.close()
-    if not _unlink_socket_if_same(path, path_stat):
-        raise RuntimeError(f'runtime status socket changed during stale cleanup: {path}')
+        os.close(path_descriptor)
 
 
 class RuntimeStatusServer:
@@ -117,7 +129,7 @@ class RuntimeStatusServer:
         _prepare_runtime_directory(self.socket_path.parent)
         self._lock_file = _acquire_runtime_lock(self.socket_path.parent / LOCK_NAME)
         self._socket = None
-        self._socket_stat = None
+        self._socket_path_descriptor = None
         self._shutdown = threading.Event()
         self._response_lock = threading.Lock()
         self._response = (
@@ -132,7 +144,7 @@ class RuntimeStatusServer:
             _remove_stale_socket(self.socket_path)
             self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._socket.bind(str(self.socket_path))
-            self._socket_stat = self.socket_path.lstat()
+            self._socket_path_descriptor = _open_socket_path(self.socket_path)
             self.socket_path.chmod(0o600)
             self._socket.listen()
             self._socket.settimeout(0.1)
@@ -143,11 +155,7 @@ class RuntimeStatusServer:
             )
             self._thread.start()
         except BaseException:
-            if self._socket is not None:
-                self._socket.close()
-            if self._socket_stat is not None:
-                _unlink_socket_if_same(self.socket_path, self._socket_stat)
-            self._lock_file.close()
+            self._close_resources()
             raise
 
     def poll(self, status: dict) -> None:
@@ -175,17 +183,57 @@ class RuntimeStatusServer:
                 except OSError:
                     pass
 
+    def _close_socket_path(self) -> None:
+        descriptor = self._socket_path_descriptor
+        self._socket_path_descriptor = None
+        if descriptor is None:
+            return
+        try:
+            if not _unlink_socket_if_same(self.socket_path, descriptor):
+                logger.warning(
+                    'runtime status socket changed before cleanup',
+                    extra={'path': str(self.socket_path)},
+                )
+        except OSError as error:
+            logger.warning(
+                'could not remove runtime status socket',
+                extra={'path': str(self.socket_path), 'error': str(error)},
+            )
+        finally:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                logger.warning(
+                    'could not close runtime status path descriptor',
+                    extra={'path': str(self.socket_path), 'error': str(error)},
+                )
+
+    def _close_resources(self) -> None:
+        self._close_socket_path()
+        if self._socket is not None:
+            try:
+                self._socket.close()
+            except OSError as error:
+                logger.warning(
+                    'could not close runtime status socket',
+                    extra={'path': str(self.socket_path), 'error': str(error)},
+                )
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=1)
+        try:
+            self._lock_file.close()
+        except OSError as error:
+            logger.warning(
+                'could not close runtime status lock',
+                extra={'path': str(self.socket_path), 'error': str(error)},
+            )
+        self._socket = None
+
     def close(self) -> None:
         if self._socket is None:
             return
         self._shutdown.set()
-        self._socket.close()
-        if self._thread is not None:
-            self._thread.join(timeout=1)
-        if self._socket_stat is not None:
-            _unlink_socket_if_same(self.socket_path, self._socket_stat)
-        self._lock_file.close()
-        self._socket = None
+        self._close_resources()
 
 
 def request_status(socket_path: Path | None = None, timeout: float = 2.0) -> dict:

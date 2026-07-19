@@ -20,16 +20,23 @@ Fedora:
 sudo dnf install dbus-devel glib2-devel
 ```
 
-Then install the Python dependencies:
+Install Macropad as an isolated user command with `uv`:
 
 ```bash
-make
+uv tool install poor-mans-macropad
 ```
 
-Install `macropad` as a user-level editable command when developing locally:
+The distribution is named `poor-mans-macropad`; the installed command remains `macropad`. `pipx`
+is also supported:
 
 ```bash
-make install-editable
+pipx install poor-mans-macropad
+```
+
+Confirm the installed version:
+
+```bash
+macropad --version
 ```
 
 ## Usage
@@ -37,48 +44,48 @@ make install-editable
 Listen using profiles from the default configuration directory:
 
 ```bash
-uv run macropad listen
-uv run macropad --verbose listen
-uv run macropad --debug listen
+macropad listen
+macropad --verbose listen
+macropad --debug listen
 ```
 
 Validate profiles without opening or grabbing input devices:
 
 ```bash
-uv run macropad validate
-uv run macropad validate profile.yml
-uv run macropad validate --directory ./profiles
+macropad validate
+macropad validate profile.yml
+macropad validate --directory ./profiles
 ```
 
 Check input permissions, profile access, and the runtime environment:
 
 ```bash
-uv run macropad doctor
+macropad doctor
 ```
 
 Inspect live keyboard worker and device state:
 
 ```bash
-uv run macropad status
+macropad status
 ```
 
 Create a first profile through guided device and key detection:
 
 ```bash
-uv run macropad init
+macropad init
 ```
 
 List readable input devices and stream key names without grabbing the keyboard:
 
 ```bash
-uv run macropad monitor
-uv run macropad monitor 'Exact Device Name'
+macropad monitor
+macropad monitor 'Exact Device Name'
 ```
 
 The module entry point is also available:
 
 ```bash
-uv run python -m macropad --help
+python -m macropad --help
 ```
 
 ## Profile Format
@@ -264,7 +271,7 @@ contain credentials or other sensitive application data, so enable it only while
 trusted action. Stdin remains `/dev/null`, actions remain detached, and the eight-action limit is
 unchanged.
 
-The checked-in service uses `--verbose` so lifecycle and action summaries remain available through
+The generated service uses `--verbose` so lifecycle and action summaries remain available through
 `macropad service logs`. To capture action output in the journal, add `--action-debug` before
 `listen` in the service's effective `ExecStart`, reload the unit, and restart the service. Remove it
 after debugging.
@@ -302,9 +309,9 @@ handle even when a check fails. When the service is active, stop it and rerun do
 need to distinguish Macropad's expected grabs from another input grabber:
 
 ```bash
-uv run macropad service stop
-uv run macropad doctor
-uv run macropad service start
+macropad service stop
+macropad doctor
+macropad service start
 ```
 
 ### Input Permissions
@@ -426,28 +433,63 @@ logs.
 Install and start the systemd user service:
 
 ```bash
-make systemd
-uv run macropad service enable
-uv run macropad service start
+macropad service install
 ```
 
-`make systemd` renders the checked-in unit template for the current checkout and validates it before installation.
+The command writes `$XDG_CONFIG_HOME/systemd/user/macropad.service` when `XDG_CONFIG_HOME` is
+absolute, defaulting to `~/.config/systemd/user/macropad.service`, then reloads systemd and enables
+and starts the unit. The generated unit invokes the `macropad` executable from the active tool
+environment and does not depend on a source checkout. Reinstalling updates a recognized generated
+unit. Macropad refuses to replace an unrelated unit at that path unless
+`macropad service install --force` is used.
 
 Manage the installed unit through the CLI:
 
 ```bash
-uv run macropad service status
-uv run macropad service logs
-uv run macropad service restart
-uv run macropad service stop
-uv run macropad service disable
+macropad service status
+macropad service logs
+macropad service restart
+macropad service stop
+macropad service disable
 ```
 
 `service logs` follows the systemd journal until interrupted. These commands preserve the output and
 exit status from `systemctl --user` or `journalctl --user`. Use `macropad listen` instead when running
 Macropad directly in the foreground.
 
+### Upgrade And Uninstall
+
+Upgrade the tool, refresh the generated service path, and restart it:
+
+```bash
+uv tool upgrade poor-mans-macropad
+macropad service install
+macropad service restart
+```
+
+For `pipx`, replace the first command with `pipx upgrade poor-mans-macropad`.
+
+Remove the service before uninstalling the tool:
+
+```bash
+macropad service uninstall
+uv tool uninstall poor-mans-macropad
+```
+
+`service uninstall` stops and disables the unit, removes it only when its generated marker is
+present, and reloads systemd. It does not remove profiles. For a `pipx` installation, use
+`pipx uninstall poor-mans-macropad` as the final command.
+
 ## Development
+
+Install the native dependencies listed above, then create the project environment. Development uses
+the same service renderer and lifecycle as released installations:
+
+```bash
+make
+make install-editable
+uv run macropad service install
+```
 
 ```bash
 make test
@@ -461,7 +503,9 @@ make build
 
 Run `make format` to apply the Ruff lint and formatting policy.
 
-CI runs the unit suite on Python 3.10 through 3.14, verifies linting, formatting, the lockfile, wheel installation, packaged assets, service lifecycle, systemd unit, and distribution build.
+CI runs the unit suite on Python 3.10 through 3.14, verifies linting, formatting, the lockfile, wheel
+installation, packaged assets, service lifecycle, systemd unit, and distribution build. See
+[`RELEASING.md`](RELEASING.md) for the Trusted Publishing release process.
 
 ## License
 

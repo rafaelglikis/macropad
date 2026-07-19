@@ -270,10 +270,7 @@ Verification:
 
 ### 9. Improve Installation, XDG, And Service Lifecycle UX
 
-Status: [ ] Not started
-
-Progress: `XDG_CONFIG_HOME` resolution and legacy `~/.config` fallback are complete. Installation,
-service portability, version reporting, completion, and uninstall work remain.
+Status: [x] Complete
 
 Goal: Support normal user installation without requiring a development checkout.
 

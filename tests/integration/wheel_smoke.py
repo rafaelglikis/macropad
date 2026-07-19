@@ -42,10 +42,10 @@ def main() -> None:
             PROJECT_ROOT,
             clean_env,
         )
-        source_archives = list(dist_path.glob('macropad-*.tar.gz'))
+        source_archives = list(dist_path.glob('poor_mans_macropad-*.tar.gz'))
         if len(source_archives) != 1:
             raise RuntimeError(f'expected one source archive, found {len(source_archives)}')
-        wheels = list(dist_path.glob('macropad-*.whl'))
+        wheels = list(dist_path.glob('poor_mans_macropad-*.whl'))
         if len(wheels) != 1:
             raise RuntimeError(f'expected one wheel, found {len(wheels)}')
         wheel_path = wheels[0]
@@ -67,6 +67,7 @@ def main() -> None:
                 'macropad/cli/validate.py',
                 'macropad/diagnostics.py',
                 'macropad/runtime_status.py',
+                'macropad/service_unit.py',
             }
             missing_members = required_members - members
             if missing_members:
@@ -93,6 +94,9 @@ def main() -> None:
             if len(metadata_files) != 1:
                 raise RuntimeError('wheel must contain one METADATA file')
             metadata = Parser().parsestr(wheel.read(metadata_files[0]).decode())
+            if metadata['Name'] != 'poor-mans-macropad':
+                raise RuntimeError('wheel has the wrong distribution name')
+            package_version = metadata['Version']
             if metadata['License-Expression'] != 'MIT':
                 raise RuntimeError('wheel does not declare the MIT license')
             if metadata['Description-Content-Type'] != 'text/markdown':
@@ -123,6 +127,16 @@ def main() -> None:
         for help_output in (console_help.stdout, module_help.stdout):
             if 'Turn every keyboard into a Macropad' not in help_output:
                 raise RuntimeError('installed entry point did not show macropad help')
+
+        console_version = run([str(console_path), '--version'], work_path, clean_env)
+        module_version = run(
+            [str(python_path), '-m', 'macropad', '--version'],
+            work_path,
+            clean_env,
+        )
+        for version_output in (console_version.stdout, module_version.stdout):
+            if version_output.strip() != f'macropad {package_version}':
+                raise RuntimeError(f'installed entry point has wrong version: {version_output!r}')
 
         installed_package = run(
             [

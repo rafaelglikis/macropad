@@ -7,14 +7,14 @@
 - Run one test with `uv run python -m unittest tests.test_handlers.KeyboardHandlerLayerTests.test_down_only_binding_repeats_for_key_hold_events`; run a module with `uv run python -m unittest tests.test_handlers`.
 - Before finalizing Python changes, run `make format`, `make lint`, and `make test` in that order. Ruff is pinned in the dev dependency group and enforces 100-column, single-quote formatting plus `E4`, `E7`, `E9`, `F`, `I`, and `B` rules.
 - Integration scripts live under `tests/integration/` and are intentionally excluded from normal `unittest` discovery. Run `make test-wheel` for packaging/assets/metadata/entry points, `make test-service` for headless startup and graceful SIGTERM, and `make test-systemd` for unit rendering. `make test-wheel` creates an isolated environment and may need network access and native build dependencies.
-- `make build` creates ignored artifacts under `dist/`; systemd rendering creates ignored `tmp/macropad.service`. Do not edit or commit either generated directory.
+- `make build` creates ignored artifacts under `dist/`. Do not edit or commit generated distributions.
 - CI tests Python 3.10 through 3.14, then checks lint, lockfile, wheel installation, service lifecycle, systemd rendering, and distribution artifacts.
 
 ## Runtime Architecture
 
 - Both `macropad` and `python -m macropad` enter through `src/macropad/cli/__init__.py`, which parses arguments and dispatches to focused command modules. `cli/listen.py` is the only component that calls supervisor reloads; `profile_watcher.py` owns Watchdog event handling, observer lifecycle, and reload debounce state.
 - Keep `cli/__init__.py` limited to argument parsing, command dispatch, and global error handling. Put command workflows in focused modules under `cli/`, and keep reusable state machines, operating-system adapters, and report rendering outside the command package.
-- `cli/service.py` owns the service command actions and non-shelling invocations of `systemctl --user` and `journalctl --user`.
+- `cli/service.py` owns service command actions and non-shelling invocations of `systemctl --user` and `journalctl --user`; `service_unit.py` owns executable and XDG unit-path resolution, rendering, ownership checks, and atomic unit writes.
 - `diagnostics.py` classifies read-only environment checks; `cli/doctor.py` renders them and determines command status. Keep evdev handle probing in `interceptor.py` and systemd probing in `cli/service.py`.
 - `cli/monitor.py` renders device listings and key events; keep non-grabbing evdev enumeration, handle lifecycle, and reconnect behavior in `interceptor.py`.
 - `ProfileSupervisor` validates and merges the complete candidate configuration before reconciliation, then owns one worker slot per keyboard name, process lifecycle, per-device retry backoff, and bounded graceful shutdown.
@@ -32,6 +32,6 @@
 
 ## Service Operations
 
-- The checked-in unit is `systemd/macropad.service.in`; `tools/render_systemd_unit.py` safely renders checkout paths. Use `make systemd` to validate and install it instead of editing `~/.config/systemd/user/macropad.service` directly.
-- The service runs this checkout's `.venv/bin/macropad`, not the user-level command installed by `make install-editable`; synchronize `.venv` before restarting it.
+- Use `uv run macropad service install` to atomically generate, validate ownership of, enable, and start the user unit. It resolves the executable from the active environment and refuses to replace unrecognized units unless `--force` is explicit.
+- Development and released installations use the same renderer in `service_unit.py`; `make test-systemd` validates that production output. There is no checked-in unit template or separate checkout installer.
 - After runtime changes, use `uv run macropad service restart`, then verify with `uv run macropad service status` or `journalctl --user -u macropad.service`. The unit expects cooperative SIGTERM shutdown, `KillMode=mixed`, and a 10-second stop timeout.
