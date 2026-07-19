@@ -62,8 +62,14 @@ uv run python -m macropad --help
 
 ## Profile Format
 
-Macropad loads `.yml` files from `~/.config/macropad/profiles/` by default. A profile uses the
-strict version 1 format and names a keyboard exactly as Linux evdev reports it:
+Macropad loads `.yml` files from `$XDG_CONFIG_HOME/macropad/profiles/`, defaulting to
+`~/.config/macropad/profiles/` when `XDG_CONFIG_HOME` is unset or relative. A profile uses the strict
+version 1 format and names a keyboard exactly as Linux evdev reports it:
+
+When a custom absolute `XDG_CONFIG_HOME` is configured but its Macropad profile directory does not
+exist, an existing legacy `~/.config/macropad/profiles/` directory remains active. Create or migrate
+profiles into the XDG directory to switch; when both directories exist, the XDG directory wins.
+Macropad never moves profile files automatically.
 
 ```yaml
 device: My Macro Keyboard

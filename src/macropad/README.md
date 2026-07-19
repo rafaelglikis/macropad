@@ -122,9 +122,14 @@ current `/dev/input/event*` nodes with that name.
 8. The interceptor waits for matching devices, opens and grabs every matching event node, and begins
    forwarding input events.
 
-If the default configuration directory contains profiles, the CLI automatically enables profile
-watching. If it does not exist or contains no YAML files, startup fails with profile-format guidance
-without creating directories or example files.
+`cli.profile_files` resolves the default directory from an absolute `XDG_CONFIG_HOME`, falling back
+to `~/.config` when it is unset or invalid. If a custom XDG profile directory is absent but the
+legacy `~/.config/macropad/profiles/` directory exists, the legacy path remains active until the XDG
+directory is created. No files are migrated automatically.
+
+If the resolved default configuration directory contains profiles, the CLI automatically enables
+profile watching. If it does not exist or contains no YAML files, startup fails with profile-format
+guidance without creating directories or example files.
 
 The validation command module delegates to `validation.run()`, which uses the same complete load,
 validation, grouping, and merge path as worker startup, but never initializes notifications,

@@ -272,6 +272,9 @@ Verification:
 
 Status: [ ] Not started
 
+Progress: `XDG_CONFIG_HOME` resolution and legacy `~/.config` fallback are complete. Installation,
+service portability, version reporting, completion, and uninstall work remain.
+
 Goal: Support normal user installation without requiring a development checkout.
 
 Deliverables:

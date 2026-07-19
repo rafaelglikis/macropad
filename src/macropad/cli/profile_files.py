@@ -1,9 +1,35 @@
 import argparse
 import logging
+import os
 import pathlib
+from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
-DEFAULT_CONFIG_DIR = pathlib.Path.home() / '.config' / 'macropad' / 'profiles'
+
+
+def resolve_default_config_directory(
+    environ: Mapping[str, str] | None = None,
+    home: pathlib.Path | None = None,
+) -> pathlib.Path:
+    environ = os.environ if environ is None else environ
+    home = pathlib.Path.home() if home is None else home
+    legacy_directory = home / '.config' / 'macropad' / 'profiles'
+
+    xdg_config_home = environ.get('XDG_CONFIG_HOME')
+    if not xdg_config_home:
+        return legacy_directory
+
+    xdg_config_home_path = pathlib.Path(xdg_config_home)
+    if not xdg_config_home_path.is_absolute():
+        return legacy_directory
+
+    xdg_directory = xdg_config_home_path / 'macropad' / 'profiles'
+    if xdg_directory.exists() or not legacy_directory.exists():
+        return xdg_directory
+    return legacy_directory
+
+
+DEFAULT_CONFIG_DIR = resolve_default_config_directory()
 
 
 def get_profile_paths(args: argparse.Namespace) -> list[str]:
