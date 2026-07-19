@@ -107,6 +107,67 @@ class ProfileTests(unittest.TestCase):
             profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions['up'],
         )
 
+    def test_inline_layer_command_string_is_up_shorthand(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {
+                        'up': 'base-command',
+                        'layers': {'mod': 'layer-command'},
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(
+            ('layer-command',),
+            profile_config.keyboard.layers['mod'].bindings['KEY_A'].actions['up'],
+        )
+
+    def test_layer_fallback_defaults_to_base_and_can_be_disabled(self):
+        default_profile = profiles.validate_profile_data(
+            self._profile_data(
+                layers={
+                    'mod': {
+                        'bindings': {'KEY_B': 'layer-command'},
+                    }
+                }
+            )
+        )
+        disabled_profile = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {
+                        'up': 'base-command',
+                        'layers': {'mod': 'layer-command'},
+                    },
+                },
+                layers={'mod': {'fallback': 'none'}},
+            )
+        )
+
+        self.assertEqual('base', default_profile.keyboard.layers['mod'].fallback)
+        self.assertEqual('none', disabled_profile.keyboard.layers['mod'].fallback)
+        self.assertIn('KEY_A', disabled_profile.keyboard.layers['mod'].bindings)
+        self.assertEqual(
+            {'bindings': {'KEY_A': {'up': ['layer-command']}}, 'fallback': 'none'},
+            disabled_profile.keyboard.layers['mod'].to_data(),
+        )
+
+    def test_layer_rejects_invalid_fallback(self):
+        for fallback in ('parent', True, []):
+            with self.subTest(fallback=fallback):
+                with self.assertRaises(profiles.ProfileValidationError) as context:
+                    profiles.validate_profile_data(
+                        self._profile_data(layers={'mod': {'fallback': fallback}}),
+                        source='fallback.yml',
+                    )
+
+                self.assertEqual(
+                    'fallback.yml: layers.mod.fallback: expected "base" or "none"',
+                    str(context.exception),
+                )
+
     def test_inline_and_top_level_layers_are_combined(self):
         profile_config = profiles.validate_profile_data(
             self._profile_data(
@@ -204,6 +265,92 @@ class ProfileTests(unittest.TestCase):
 
         self.assertIn(
             'broken.yml: bindings.KEY_A.up: invalid handler command', str(context.exception)
+        )
+
+    def test_layer_modes_are_validated_with_momentary_restricted_to_down(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {'down': '^layer mod momentary'},
+                    'KEY_B': {'up': '^layer mod toggle'},
+                    'KEY_C': {'up': '^layer mod once'},
+                },
+                layers={'mod': {'fallback': 'none'}},
+            )
+        )
+
+        self.assertEqual(
+            ('^layer mod momentary',),
+            profile_config.keyboard.bindings['KEY_A'].actions['down'],
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.validate_profile_data(
+                self._profile_data(
+                    bindings={'KEY_A': {'up': '^layer mod momentary'}},
+                    layers={'mod': {'fallback': 'none'}},
+                ),
+                source='momentary.yml',
+            )
+
+        self.assertEqual(
+            'momentary.yml: bindings.KEY_A.up: momentary layer command requires a down event',
+            str(context.exception),
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.validate_profile_data(
+                self._profile_data(
+                    bindings={
+                        'KEY_A': {
+                            'down': '^layer mod momentary',
+                            'up': 'release-command',
+                        }
+                    },
+                    layers={'mod': {'fallback': 'none'}},
+                ),
+                source='momentary.yml',
+            )
+
+        self.assertEqual(
+            'momentary.yml: bindings.KEY_A.down: momentary layer command requires a down-only '
+            'binding',
+            str(context.exception),
+        )
+
+    def test_toggle_mode_is_restricted_to_release_resolved_events(self):
+        for event_name in ('down', 'hold'):
+            with self.subTest(event_name=event_name):
+                with self.assertRaises(profiles.ProfileValidationError) as context:
+                    profiles.validate_profile_data(
+                        self._profile_data(
+                            bindings={'KEY_A': {event_name: '^layer mod toggle'}},
+                            layers={'mod': {'fallback': 'none'}},
+                        ),
+                        source='toggle.yml',
+                    )
+
+                self.assertEqual(
+                    f'toggle.yml: bindings.KEY_A.{event_name}: toggle layer command requires one '
+                    'of: double_tap, triple_tap, up',
+                    str(context.exception),
+                )
+
+    def test_shell_command_ending_in_momentary_is_not_a_layer_command(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {
+                        'down': 'echo foo momentary',
+                        'up': 'release-command',
+                    }
+                }
+            )
+        )
+
+        self.assertEqual(
+            ('echo foo momentary',),
+            profile_config.keyboard.bindings['KEY_A'].actions['down'],
         )
 
     def test_load_yml_reports_filename_for_invalid_yaml(self):
@@ -379,6 +526,30 @@ class ProfileTests(unittest.TestCase):
             str(context.exception),
         )
 
+    def test_merge_reports_layer_fallback_conflict_from_later_fragment(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                layers={'mod': {'fallback': 'none'}},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                layers={'mod': {'fallback': 'base'}},
+            ),
+            source='second.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([first, second])
+
+        self.assertEqual(
+            'second.yml: layers.mod.fallback: conflicts with an earlier profile fragment',
+            str(context.exception),
+        )
+
     def test_merge_allows_layer_reference_defined_by_another_fragment(self):
         binding_fragment = profiles.validate_profile_data(
             self._profile_data(bindings={'KEY_A': {'up': '^layer navigation'}}),
@@ -440,6 +611,26 @@ class ProfileTests(unittest.TestCase):
             "inline.yml: bindings.KEY_A.layers.navigation.up: references unknown layer 'missing'",
             str(context.exception),
         )
+
+    def test_inline_layer_shorthand_reference_is_validated_after_merge(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={
+                    'KEY_A': {
+                        'up': 'base-command',
+                        'layers': {'mod': '^layer navigation'},
+                    },
+                },
+                layers={
+                    'navigation': {'fallback': 'none'},
+                },
+            ),
+            source='inline.yml',
+        )
+
+        merged = profiles.merge_data([profile_config])
+
+        self.assertIn('navigation', merged.keyboard.layers)
 
     def test_merge_rejects_profile_without_reachable_base_action(self):
         profile_config = profiles.validate_profile_data(

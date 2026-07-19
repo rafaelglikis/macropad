@@ -203,7 +203,7 @@ sequenceDiagram
     Device->>Interceptor: InputEvent
     Interceptor->>Handler: handle(event)
     Interceptor->>Handler: tick()
-    Handler->>Handler: resolve key, tap, hold, and layer state with configured deadlines
+    Handler->>Handler: resolve layer override or base fallback and event state
     Handler->>Executor: submit(command)
     Executor->>Shell: Popen(shell=True, start_new_session=True)
     Interceptor->>Handler: tick on later loop iterations
@@ -216,6 +216,15 @@ triple-tap resolution use the profile's `multi_tap_ms` monotonic deadline and ar
 `KeyboardHandler.tick()` on the listener thread. One-shot layers use `one_shot_timeout_ms` through
 the same threadless mechanism. Omitted timing fields retain the 200 ms and 5,000 ms defaults. Hold
 recognition deliberately remains based on evdev kernel-repeat events rather than elapsed time.
+
+Active layers resolve their own binding first and fall back to the base binding unless their
+`LayerConfig` uses `fallback: none`. One-shot claims occur after this resolution, so an executed base
+fallback consumes the one-shot layer. Toggle and momentary activation-key events are intercepted
+before normal lookup: toggle release always deactivates its layer, while momentary release restores
+an immutable snapshot of the previous layer state. Nested snapshots discard states whose activation
+keys were released while hidden. Every transition increments the layer generation, preventing
+pending events from a replaced layer from executing later. Momentary transitions are intentionally
+excluded from desktop notifications.
 
 Actions are trusted shell strings. Each worker may have at most eight active actions; additional
 actions are dropped rather than queued and logged with the active count and limit. Action processes
@@ -381,7 +390,8 @@ prevent headless startup or event handling.
   deferred layer-reference paths, and explicit timing-field metadata used by merged validation.
 - `KeyboardConfig` owns base bindings, named layers, and effective timing configuration.
 - `TimingConfig` owns the multi-tap resolution and one-shot layer deadlines in milliseconds.
-- `LayerConfig` owns layer bindings.
+- `LayerConfig` owns layer bindings, effective base-fallback policy, and whether that policy was
+  explicitly configured for fragment merging.
 - `BindingConfig` maps event names to command tuples.
 - `FrozenDict` prevents nested mutation while keeping configurations comparable, hashable, and
   picklable.

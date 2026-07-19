@@ -15,6 +15,7 @@ from .config import (
 
 PROFILE_FIELDS = {'device', 'version', 'timing', 'bindings', 'layers'}
 EVENT_NAMES = {'up', 'down', 'hold', 'double_tap', 'triple_tap'}
+TOGGLE_EVENT_NAMES = {'up', 'double_tap', 'triple_tap'}
 TIMING_BOUNDS = {
     'multi_tap_ms': (1, 5000),
     'one_shot_timeout_ms': (1, 3_600_000),
@@ -187,12 +188,9 @@ def _parse_binding(
     source: str,
     path: str,
     allow_inline_layers: bool,
-    allow_shorthand: bool = True,
 ) -> tuple[BindingConfig, dict[str, BindingConfig]]:
     if isinstance(binding, str):
-        if not allow_shorthand:
-            raise ProfileValidationError(source, path, 'expected an event mapping')
-        return BindingConfig(actions={'up': (_parse_action(binding, source, path),)}), {}
+        return BindingConfig(actions={'up': (_parse_action(binding, source, path, 'up'),)}), {}
 
     if not isinstance(binding, dict):
         raise ProfileValidationError(source, path, 'expected a command string or event mapping')
@@ -217,7 +215,16 @@ def _parse_binding(
                 event_path,
                 f'unsupported event; expected one of: {supported_events}',
             )
-        actions[event_name] = _parse_actions(event_actions, source, event_path)
+        actions[event_name] = _parse_actions(event_actions, source, event_path, event_name)
+
+    if len(actions) > 1 and any(
+        _is_layer_mode_command(command, 'momentary') for command in actions.get('down', ())
+    ):
+        raise ProfileValidationError(
+            source,
+            f'{path}.down',
+            'momentary layer command requires a down-only binding',
+        )
 
     return BindingConfig(actions=actions), inline_layers
 
@@ -235,7 +242,6 @@ def _parse_inline_layers(layers, source: str, path: str) -> dict[str, BindingCon
             source,
             layer_path,
             allow_inline_layers=False,
-            allow_shorthand=False,
         )
         parsed_layers[layer_name] = parsed_binding
     return parsed_layers
@@ -251,21 +257,32 @@ def _parse_layers(layers, source: str, path: str) -> dict[str, LayerConfig]:
         _validate_layer_name(layer_name, source, path)
         if not isinstance(layer, dict):
             raise ProfileValidationError(source, layer_path, 'expected a layer mapping')
-        unknown_fields = set(layer) - {'bindings'}
+        unknown_fields = set(layer) - {'bindings', 'fallback'}
         if unknown_fields:
             field_name = sorted(unknown_fields)[0]
             raise ProfileValidationError(
                 source, f'{layer_path}.{field_name}', 'unsupported layer field'
             )
-        if 'bindings' not in layer:
+        if 'bindings' not in layer and 'fallback' not in layer:
             raise ProfileValidationError(source, layer_path, 'missing bindings')
+        fallback = layer.get('fallback', 'base')
+        if not isinstance(fallback, str) or fallback not in {'base', 'none'}:
+            raise ProfileValidationError(
+                source,
+                f'{layer_path}.fallback',
+                'expected "base" or "none"',
+            )
         bindings, _ = _parse_bindings(
-            layer['bindings'],
+            layer.get('bindings', {}),
             source,
             f'{layer_path}.bindings',
             allow_inline_layers=False,
         )
-        parsed_layers[layer_name] = LayerConfig(bindings=bindings)
+        parsed_layers[layer_name] = LayerConfig(
+            bindings=bindings,
+            fallback=fallback,
+            fallback_configured='fallback' in layer,
+        )
     return parsed_layers
 
 
@@ -274,19 +291,20 @@ def _validate_layer_name(layer_name, source: str, path: str) -> None:
         raise ProfileValidationError(source, path, 'layer names must be non-empty strings')
 
 
-def _parse_actions(actions, source: str, path: str) -> tuple[str, ...]:
+def _parse_actions(actions, source: str, path: str, event_name: str) -> tuple[str, ...]:
     if isinstance(actions, str):
-        return (_parse_action(actions, source, path),)
+        return (_parse_action(actions, source, path, event_name),)
     if not isinstance(actions, list) or not actions:
         raise ProfileValidationError(
             source, path, 'expected a command string or non-empty list of commands'
         )
     return tuple(
-        _parse_action(action, source, f'{path}[{index}]') for index, action in enumerate(actions)
+        _parse_action(action, source, f'{path}[{index}]', event_name)
+        for index, action in enumerate(actions)
     )
 
 
-def _parse_action(action, source: str, path: str) -> str:
+def _parse_action(action, source: str, path: str, event_name: str) -> str:
     if not isinstance(action, str) or not action.strip():
         raise ProfileValidationError(source, path, 'commands must be non-empty strings')
     if not action.startswith('^'):
@@ -295,13 +313,32 @@ def _parse_action(action, source: str, path: str) -> str:
     command_parts = action[1:].split()
     if command_parts == ['default_layer']:
         return action
-    if (
-        len(command_parts) in (2, 3)
-        and command_parts[0] == 'layer'
-        and (len(command_parts) == 2 or command_parts[2] == 'once')
-    ):
+    if len(command_parts) in (2, 3) and command_parts[0] == 'layer':
+        mode = command_parts[2] if len(command_parts) == 3 else 'persistent'
+        if len(command_parts) == 3 and mode not in {'once', 'momentary', 'toggle'}:
+            raise ProfileValidationError(source, path, f'invalid handler command {action!r}')
+        if mode == 'momentary' and event_name != 'down':
+            raise ProfileValidationError(
+                source,
+                path,
+                'momentary layer command requires a down event',
+            )
+        if mode == 'toggle' and event_name not in TOGGLE_EVENT_NAMES:
+            expected_events = ', '.join(sorted(TOGGLE_EVENT_NAMES))
+            raise ProfileValidationError(
+                source,
+                path,
+                f'toggle layer command requires one of: {expected_events}',
+            )
         return action
     raise ProfileValidationError(source, path, f'invalid handler command {action!r}')
+
+
+def _is_layer_mode_command(command: str, mode: str) -> bool:
+    if not command.startswith('^'):
+        return False
+    command_parts = command[1:].split()
+    return len(command_parts) == 3 and command_parts[0] == 'layer' and command_parts[2] == mode
 
 
 def _collect_layer_references(profile_data: dict) -> tuple[LayerReference, ...]:
@@ -309,7 +346,7 @@ def _collect_layer_references(profile_data: dict) -> tuple[LayerReference, ...]:
     _collect_binding_references(profile_data.get('bindings', {}), 'bindings', references)
     for layer_name, layer in profile_data.get('layers', {}).items():
         _collect_binding_references(
-            layer['bindings'],
+            layer.get('bindings', {}),
             f'layers.{layer_name}.bindings',
             references,
         )
@@ -333,6 +370,13 @@ def _collect_binding_references(
                 _collect_action_references(actions, event_path, references)
                 continue
             for layer_name, layer_binding in actions.items():
+                if isinstance(layer_binding, str):
+                    _collect_action_references(
+                        layer_binding,
+                        f'{event_path}.{layer_name}',
+                        references,
+                    )
+                    continue
                 for layer_event_name, layer_actions in layer_binding.items():
                     _collect_action_references(
                         layer_actions,
@@ -377,7 +421,23 @@ def _merge_layers(
                 f'layers.{layer_name}.bindings.{key_name}',
                 source_name,
             )
-        merged_layers[layer_name] = LayerConfig(bindings=merged_bindings)
+        target_layer = merged_layers[layer_name]
+        fallback = target_layer.fallback
+        fallback_configured = target_layer.fallback_configured
+        if source_layer.fallback_configured:
+            if fallback_configured and fallback != source_layer.fallback:
+                raise ProfileValidationError(
+                    source_name,
+                    f'layers.{layer_name}.fallback',
+                    'conflicts with an earlier profile fragment',
+                )
+            fallback = source_layer.fallback
+            fallback_configured = True
+        merged_layers[layer_name] = LayerConfig(
+            bindings=merged_bindings,
+            fallback=fallback,
+            fallback_configured=fallback_configured,
+        )
     return merged_layers
 
 

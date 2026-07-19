@@ -11,11 +11,15 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Added optional profile timing settings for multi-tap resolution and one-shot layer timeouts.
 - Added a global `--no-notifications` option that can be persisted in the generated systemd service.
+- Added first-class momentary and toggle layer modes.
+- Added inline layer command shorthand equivalent to an `up` action.
 
 ### Changed
 
 - Moved desktop notification dependencies to the optional `notifications` package extra.
 - Made notification backend loading lazy and stopped retrying after a backend failure.
+- Changed active layers to fall back to base bindings by default, with per-layer `fallback: none`
+  available to preserve layer-only behavior.
 
 ### Fixed
 
