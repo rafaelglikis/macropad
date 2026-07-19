@@ -43,6 +43,61 @@ class ProfileTests(unittest.TestCase):
             profile_config.keyboard.bindings['KEY_A'].actions['up'],
         )
 
+    def test_timing_defaults_preserve_existing_behavior(self):
+        profile_config = profiles.validate_profile_data(self._profile_data())
+
+        self.assertEqual(200, profile_config.keyboard.timing.multi_tap_ms)
+        self.assertEqual(5000, profile_config.keyboard.timing.one_shot_timeout_ms)
+        self.assertNotIn('timing', profile_config.to_data())
+
+    def test_timing_fields_are_validated_and_normalized(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                timing={
+                    'multi_tap_ms': 350,
+                    'one_shot_timeout_ms': 7000,
+                }
+            )
+        )
+
+        self.assertEqual(350, profile_config.keyboard.timing.multi_tap_ms)
+        self.assertEqual(7000, profile_config.keyboard.timing.one_shot_timeout_ms)
+        self.assertEqual(
+            {'multi_tap_ms': 350, 'one_shot_timeout_ms': 7000},
+            profile_config.to_data()['timing'],
+        )
+
+    def test_timing_serialization_preserves_omitted_fields(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(timing={'multi_tap_ms': 350})
+        )
+
+        self.assertEqual({'multi_tap_ms': 350}, profile_config.to_data()['timing'])
+
+    def test_timing_rejects_unknown_fields_and_out_of_bounds_values(self):
+        invalid_cases = (
+            (None, 'timing: expected a timing mapping'),
+            ({'unknown': 1}, 'timing.unknown: unsupported timing field'),
+            ({'multi_tap_ms': 0}, 'timing.multi_tap_ms: expected an integer from 1 to 5000'),
+            (
+                {'one_shot_timeout_ms': 3_600_001},
+                'timing.one_shot_timeout_ms: expected an integer from 1 to 3600000',
+            ),
+            (
+                {'multi_tap_ms': 200.0},
+                'timing.multi_tap_ms: expected an integer from 1 to 5000',
+            ),
+        )
+        for timing, expected_message in invalid_cases:
+            with self.subTest(timing=timing):
+                with self.assertRaises(profiles.ProfileValidationError) as context:
+                    profiles.validate_profile_data(
+                        self._profile_data(timing=timing),
+                        source='timing.yml',
+                    )
+
+                self.assertEqual(f'timing.yml: {expected_message}', str(context.exception))
+
     def test_inline_layers_are_normalized_into_keyboard_config(self):
         profile_config = profiles.validate_profile_data(self._profile_data())
 
@@ -194,11 +249,14 @@ class ProfileTests(unittest.TestCase):
             profile_config.keyboard.bindings['KEY_A'].actions['up'] = ('changed-command',)
 
     def test_profile_config_remains_picklable(self):
-        profile_config = profiles.validate_profile_data(self._profile_data())
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(timing={'multi_tap_ms': 350})
+        )
 
         restored_config = pickle.loads(pickle.dumps(profile_config))
 
         self.assertEqual(profile_config, restored_config)
+        self.assertEqual(profile_config.timing_fields, restored_config.timing_fields)
 
     def test_layer_reference_metadata_remains_picklable(self):
         profile_config = profiles.validate_profile_data(
@@ -237,6 +295,71 @@ class ProfileTests(unittest.TestCase):
             },
             merged.keyboard.to_data()['bindings'],
         )
+
+    def test_merge_combines_timing_fields_from_profile_fragments(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                timing={'multi_tap_ms': 350},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                timing={'one_shot_timeout_ms': 7000},
+            ),
+            source='second.yml',
+        )
+
+        merged = profiles.merge_data([first, second])
+
+        self.assertEqual(350, merged.keyboard.timing.multi_tap_ms)
+        self.assertEqual(7000, merged.keyboard.timing.one_shot_timeout_ms)
+
+    def test_merge_reports_timing_conflict_from_later_fragment(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                timing={'multi_tap_ms': 250},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                timing={'multi_tap_ms': 300},
+            ),
+            source='second.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([first, second])
+
+        self.assertEqual(
+            'second.yml: timing.multi_tap_ms: conflicts with an earlier profile fragment',
+            str(context.exception),
+        )
+
+    def test_merge_allows_repeated_identical_timing_values(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                timing={'multi_tap_ms': 350},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                timing={'multi_tap_ms': 350},
+            ),
+            source='second.yml',
+        )
+
+        merged = profiles.merge_data([first, second])
+
+        self.assertEqual(350, merged.keyboard.timing.multi_tap_ms)
 
     def test_merge_conflict_reports_later_source_and_path(self):
         first = profiles.validate_profile_data(

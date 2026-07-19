@@ -8,7 +8,6 @@ from . import notifications
 from .actions import ActionExecutor
 from .config import BindingConfig, KeyboardConfig
 
-EVENT_DEBOUNCE_SECONDS = 0.2
 DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,8 @@ class KeyboardHandler:
         self.action_executor = (
             action_executor if action_executor is not None else ActionExecutor(device=device)
         )
+        self._multi_tap_seconds = config.timing.multi_tap_ms / 1000
+        self._one_shot_timeout_seconds = config.timing.one_shot_timeout_ms / 1000
 
         self.active_layer = None
         self.layer_activation_key = None
@@ -85,7 +86,7 @@ class KeyboardHandler:
 
     def handle_event(self, event: KeyEvent, code, binding: BindingConfig, layer_generation=None):
         self._pending_events[code] = (
-            self._clock() + EVENT_DEBOUNCE_SECONDS,
+            self._clock() + self._multi_tap_seconds,
             event,
             binding,
             layer_generation,
@@ -185,7 +186,7 @@ class KeyboardHandler:
         ):
             self.deactivate_layer()
 
-    def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=5):
+    def activate_layer(self, layer_name, activation_key_code, once=False, deactivate_after=None):
         if layer_name in self.config.layers:
             self._cancel_layer_deadline()
             self._layer_generation += 1
@@ -194,8 +195,11 @@ class KeyboardHandler:
             self.layer_used = False
             self.layer_once = once
             self._layer_once_key = None
-            if once and deactivate_after > 0:
-                self._layer_deadline = self._clock() + deactivate_after
+            timeout = (
+                self._one_shot_timeout_seconds if deactivate_after is None else deactivate_after
+            )
+            if once and timeout > 0:
+                self._layer_deadline = self._clock() + timeout
             logger.info(
                 'layer activated',
                 extra=self._context(

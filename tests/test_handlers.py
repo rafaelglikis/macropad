@@ -27,16 +27,17 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.run_command = self.action_executor.submit
 
     @staticmethod
-    def _keyboard_config(bindings):
-        return profiles.validate_profile_data(
-            {
-                'device': 'Test Device',
-                'version': 1,
-                'bindings': bindings,
-            }
-        ).keyboard
+    def _keyboard_config(bindings, timing=None):
+        profile_data = {
+            'device': 'Test Device',
+            'version': 1,
+            'bindings': bindings,
+        }
+        if timing is not None:
+            profile_data['timing'] = timing
+        return profiles.validate_profile_data(profile_data).keyboard
 
-    def _create_handler(self, layer_binding):
+    def _create_handler(self, layer_binding, timing=None):
         return KeyboardHandler(
             self._keyboard_config(
                 {
@@ -47,7 +48,8 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
                             'mod': layer_binding,
                         },
                     },
-                }
+                },
+                timing,
             ),
             clock=self.clock,
             action_executor=self.action_executor,
@@ -189,6 +191,29 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
     def test_one_shot_layer_deactivates_when_deadline_passes(self):
         handler = self._create_handler({'up': 'layer-command'})
         handler.activate_layer('mod', 'KEY_SPACE', once=True, deactivate_after=0.05)
+
+        self._advance(handler, 0.04)
+        self.assertEqual('mod', handler.active_layer)
+
+        self._advance(handler, 0.02)
+        self.assertIsNone(handler.active_layer)
+
+    def test_default_one_shot_timeout_preserves_existing_behavior(self):
+        handler = self._create_handler({'up': 'layer-command'})
+        self._activate_layer(handler)
+
+        self._advance(handler, 4.9)
+        self.assertEqual('mod', handler.active_layer)
+
+        self._advance(handler, 0.2)
+        self.assertIsNone(handler.active_layer)
+
+    def test_configured_one_shot_timeout_controls_layer_deadline(self):
+        handler = self._create_handler(
+            {'up': 'layer-command'},
+            timing={'one_shot_timeout_ms': 50},
+        )
+        self._activate_layer(handler)
 
         self._advance(handler, 0.04)
         self.assertEqual('mod', handler.active_layer)
@@ -340,6 +365,34 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
 
         self._advance(handler, 0.11)
         self.assert_submitted_commands('a-command')
+
+    def test_configured_multi_tap_window_controls_resolution_deadline(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_A': {
+                        'up': 'a-command',
+                        'double_tap': 'a-double-tap-command',
+                    },
+                },
+                timing={'multi_tap_ms': 500},
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        handler.handle(self._event(ecodes.KEY_A, 0))
+
+        self._advance(handler, 0.3)
+        self.run_command.assert_not_called()
+
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        handler.handle(self._event(ecodes.KEY_A, 0))
+        self._advance(handler, 0.49)
+        self.run_command.assert_not_called()
+
+        self._advance(handler, 0.02)
+        self.assert_submitted_commands('a-double-tap-command')
 
     def test_tap_history_is_independent_for_each_key(self):
         handler = KeyboardHandler(

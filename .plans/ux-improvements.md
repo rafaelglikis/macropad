@@ -326,7 +326,7 @@ Verification:
 
 ### 11. Make Event Timing Understandable And Configurable
 
-Status: [ ] Not started
+Status: [x] Complete
 
 Goal: Make tap, multi-tap, hold, and one-shot behavior consistent across keyboards and user
 preferences.

@@ -215,6 +215,40 @@ bindings:
     hold: notify-send Macropad 'Held and released'
 ```
 
+### Timing
+
+Timing configuration is optional. Profiles without it retain the existing 200 ms multi-tap window
+and five-second one-shot timeout. Configure either or both fields at the top level:
+
+```yaml
+device: My Macro Keyboard
+version: '1'
+timing:
+  multi_tap_ms: 300
+  one_shot_timeout_ms: 8000
+bindings:
+  KEY_C:
+    up: notify-send Macropad 'Single tap'
+    double_tap: notify-send Macropad 'Double tap'
+  KEY_N:
+    up: ^layer navigation once
+layers:
+  navigation:
+    bindings:
+      KEY_H: notify-send Macropad Left
+```
+
+| Field                 | Range          | Default  | Behavior                                                                                                  |
+|-----------------------|----------------|----------|-----------------------------------------------------------------------------------------------------------|
+| `multi_tap_ms`        | 1–5,000 ms     | 200 ms   | Quiet period after the latest event before a binding that needs hold or multi-tap resolution is resolved. |
+| `one_shot_timeout_ms` | 1–3,600,000 ms | 5,000 ms | Idle time a one-shot layer waits for its next key before deactivating.                                    |
+
+Increasing `multi_tap_ms` gives slower taps more time to form double- or triple-tap sequences, but
+also delays single-tap and hold resolution for bindings that contain those event choices. Hold
+detection itself remains based on evdev kernel-repeat events, so this setting does not turn hold into
+a duration-based action. One-shot timing is cancelled once a key claims the layer; that key completes
+normally and then deactivates the layer.
+
 ### Layers
 
 Layer commands begin with `^` and are handled by Macropad instead of the shell:
@@ -292,6 +326,8 @@ bindings:
 
 Bindings for different keys or events combine. Defining different commands for the same device,
 layer, key, and event is a conflict and validation fails with the later file and field path.
+Timing fields can also be split across fragments. Repeating the same value is allowed; different
+values for the same timing field are a conflict attributed to the later fragment.
 
 When default profiles or `--watch` directories are used, Macropad recognizes `.yml` files that are
 created, modified, deleted, or moved. Move events inspect both source and destination paths so
