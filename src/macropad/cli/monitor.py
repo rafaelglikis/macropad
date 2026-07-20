@@ -5,8 +5,9 @@ import threading
 
 from evdev import ecodes
 
-from .. import interceptor
-from . import service
+from .. import interceptor, profiles
+from ..config import ProfileValidationError
+from . import profile_files, service
 
 EVENT_NAMES = {
     0: 'up',
@@ -28,8 +29,23 @@ def _key_name(code: int) -> str:
     return key_name
 
 
+def _configured_device_names() -> set[str]:
+    profile_directory = profile_files.DEFAULT_CONFIG_DIR
+    if not profile_directory.exists():
+        return set()
+
+    device_names = set()
+    for path in sorted(profile_directory.glob('*.yml')):
+        try:
+            device_names.add(profiles.load_yml(str(path)).device)
+        except (OSError, ProfileValidationError):
+            continue
+    return device_names
+
+
 def list_devices() -> int:
     probes = interceptor.probe_device_access(check_grab=False)
+    configured_device_names = _configured_device_names()
     paths_by_name = {}
     errors = []
     for probe in probes:
@@ -40,7 +56,8 @@ def list_devices() -> int:
 
     for device_name, paths in sorted(paths_by_name.items()):
         path_label = 'event path' if len(paths) == 1 else 'event paths'
-        print(f'{device_name} ({len(paths)} {path_label})')
+        configured_label = ' [configured]' if device_name in configured_device_names else ''
+        print(f'{device_name}{configured_label} ({len(paths)} {path_label})')
         for path in paths:
             print(f'  {path}')
 

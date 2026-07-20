@@ -483,7 +483,8 @@ macropad service start
 
 Run `macropad monitor` without arguments to list every readable input device. Devices sharing an
 exact evdev name are grouped together and every matching `/dev/input/event*` path is shown; paths
-that cannot be opened include their permission or device error.
+that cannot be opened include their permission or device error. Device names matching a profile in
+the default profile directory are marked `[configured]`.
 
 Pass an exact listed name to stream key activity:
 

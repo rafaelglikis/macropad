@@ -7,6 +7,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Marked devices with profiles in `macropad monitor` listings.
+
 ## [0.2.1] - 2026-07-20
 
 ### Fixed
