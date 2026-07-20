@@ -2,6 +2,8 @@ import errno
 import io
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +14,20 @@ from macropad.cli import monitor, service
 
 
 class MonitorCommandTests(unittest.TestCase):
+    def test_configured_device_names_ignores_invalid_profiles(self):
+        with TemporaryDirectory() as directory:
+            profile_directory = Path(directory)
+            (profile_directory / 'valid.yml').write_text(
+                "device: Macro Keyboard\nbindings:\n  KEY_A: 'true'\n",
+                encoding='utf-8',
+            )
+            (profile_directory / 'invalid.yml').write_text('invalid: true\n', encoding='utf-8')
+
+            with patch.object(monitor.profile_files, 'DEFAULT_CONFIG_DIR', profile_directory):
+                device_names = monitor._configured_device_names()
+
+        self.assertEqual({'Macro Keyboard'}, device_names)
+
     def test_key_aliases_keep_a_copyable_primary_name(self):
         with patch.object(
             monitor.ecodes,
@@ -61,12 +77,16 @@ class MonitorCommandTests(unittest.TestCase):
 
         with (
             patch('macropad.cli.monitor.interceptor.probe_device_access', return_value=probes),
+            patch(
+                'macropad.cli.monitor._configured_device_names',
+                return_value={'Macro Keyboard'},
+            ),
             redirect_stdout(output),
         ):
             exit_status = monitor.list_devices()
 
         self.assertEqual(0, exit_status)
-        self.assertIn('Macro Keyboard (2 event paths)', output.getvalue())
+        self.assertIn('Macro Keyboard [configured] (2 event paths)', output.getvalue())
         self.assertIn('  /dev/input/event1', output.getvalue())
         self.assertIn('Other Keyboard (1 event path)', output.getvalue())
         self.assertIn('UNREADABLE /dev/input/event4: permission denied', output.getvalue())
