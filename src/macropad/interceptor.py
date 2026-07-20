@@ -179,6 +179,20 @@ def _key_name(code: int) -> str:
     return key_name
 
 
+def _preferred_key_code(key_codes) -> int:
+    modifiers = {
+        ecodes.KEY_LEFTALT,
+        ecodes.KEY_LEFTCTRL,
+        ecodes.KEY_LEFTMETA,
+        ecodes.KEY_LEFTSHIFT,
+        ecodes.KEY_RIGHTALT,
+        ecodes.KEY_RIGHTCTRL,
+        ecodes.KEY_RIGHTMETA,
+        ecodes.KEY_RIGHTSHIFT,
+    }
+    return next((code for code in key_codes if code not in modifiers), key_codes[0])
+
+
 def _wait_for_key(
     paths: Callable[[], list[str]],
     deadline: float,
@@ -216,11 +230,14 @@ def _wait_for_key(
 
                     active_keys = device.active_keys()
                     if active_keys:
-                        return device, active_keys[0]
+                        return device, _preferred_key_code(active_keys)
 
+                    pressed_keys = []
                     while event := device.read_one():
                         if event.type == ecodes.EV_KEY and event.value == 1:
-                            return device, event.code
+                            pressed_keys.append(event.code)
+                    if pressed_keys:
+                        return device, _preferred_key_code(pressed_keys)
                 except OSError as error:
                     if error.errno not in DEVICE_GONE_ERRNOS:
                         raise

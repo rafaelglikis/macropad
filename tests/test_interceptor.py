@@ -206,6 +206,29 @@ class DeviceDetectionTests(unittest.TestCase):
         )
         self.assertTrue(device.closed)
 
+    def test_detect_prefers_non_modifier_from_active_key_combination(self):
+        device = FakeInputDevice(
+            '/dev/input/event2',
+            'Macro Keyboard',
+            active_keys=(interceptor.ecodes.KEY_LEFTCTRL, interceptor.ecodes.KEY_A),
+        )
+
+        with (
+            patch(
+                'macropad.interceptor.evdev.list_devices',
+                side_effect=[
+                    ['/dev/input/event1'],
+                    ['/dev/input/event2'],
+                    ['/dev/input/event2'],
+                ],
+            ),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+        ):
+            detected = interceptor.detect()
+
+        self.assertEqual('KEY_A', detected.key_name)
+        self.assertTrue(device.closed)
+
     def test_detect_closes_candidates_without_pressed_keys(self):
         inactive_device = FakeInputDevice('/dev/input/event2', 'Inactive Keyboard')
         selected_device = FakeInputDevice('/dev/input/event3', 'Macro Keyboard', active_keys=(30,))
@@ -251,7 +274,7 @@ class DeviceDetectionTests(unittest.TestCase):
         device = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
         event = SimpleNamespace(type=1, code=48, value=1)
         device.active_keys = Mock(side_effect=[(30,), (), ()])
-        device.read_one = Mock(side_effect=[None, None, event])
+        device.read_one = Mock(side_effect=[None, None, event, None])
 
         with (
             patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
@@ -264,6 +287,23 @@ class DeviceDetectionTests(unittest.TestCase):
             interceptor.DetectedInput('Macro Keyboard', 'KEY_B', '/dev/input/event2'),
             detected,
         )
+        self.assertTrue(device.closed)
+
+    def test_capture_key_prefers_non_modifier_from_buffered_key_combination(self):
+        device = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
+        control = SimpleNamespace(type=1, code=interceptor.ecodes.KEY_LEFTCTRL, value=1)
+        key = SimpleNamespace(type=1, code=interceptor.ecodes.KEY_A, value=1)
+        device.active_keys = Mock(side_effect=[(), ()])
+        device.read_one = Mock(side_effect=[None, control, key, None])
+
+        with (
+            patch('macropad.interceptor.matching_device_paths', return_value=[device.path]),
+            patch('macropad.interceptor.InputDevice', return_value=device),
+            patch('macropad.interceptor.time.sleep'),
+        ):
+            detected = interceptor.capture_key(device.name, timeout=1)
+
+        self.assertEqual('KEY_A', detected.key_name)
         self.assertTrue(device.closed)
 
 
