@@ -127,6 +127,28 @@ access as `PASS`. Membership in the `input` group grants access to all input eve
 every keystroke, including passwords. Prefer a device-specific udev rule when broad input access is
 not acceptable.
 
+## Update
+
+Upgrade Macropad with the installer that owns it:
+
+```bash
+pipx upgrade poor-mans-macropad
+```
+
+or:
+
+```bash
+uv tool upgrade poor-mans-macropad
+```
+
+Then refresh the generated service path, restart the service, and confirm the installed version:
+
+```bash
+macropad service install
+macropad service restart
+macropad --version
+```
+
 ## Usage
 
 Listen using profiles from the default configuration directory:
@@ -587,26 +609,7 @@ macropad service disable
 exit status from `systemctl --user` or `journalctl --user`. Use `macropad listen` instead when running
 Macropad directly in the foreground.
 
-### Upgrade And Uninstall
-
-Upgrade the tool with the installer that owns it:
-
-```bash
-uv tool upgrade poor-mans-macropad
-```
-
-or:
-
-```bash
-pipx upgrade poor-mans-macropad
-```
-
-Then refresh the generated service path and restart it:
-
-```bash
-macropad service install
-macropad service restart
-```
+### Uninstall
 
 Remove the service before uninstalling the tool:
 
