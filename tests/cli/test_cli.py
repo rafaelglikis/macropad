@@ -189,11 +189,15 @@ class ServiceCommandTests(unittest.TestCase):
                 self.assertEqual(action, args.service_action)
 
     def test_service_install_accepts_force(self):
-        with patch('sys.argv', ['macropad', 'service', 'install', '--force']):
+        with patch(
+            'sys.argv',
+            ['macropad', 'service', 'install', '--force', '--action-path', '/custom/bin:/usr/bin'],
+        ):
             args = cli.parse_args()
 
         self.assertEqual('install', args.service_action)
         self.assertTrue(args.force)
+        self.assertEqual('/custom/bin:/usr/bin', args.action_path)
 
     def test_main_dispatches_service_action(self):
         args = SimpleNamespace(subcommand='service', service_action='restart')
@@ -206,7 +210,12 @@ class ServiceCommandTests(unittest.TestCase):
             exit_status = cli.main()
 
         self.assertEqual(7, exit_status)
-        run_service.assert_called_once_with('restart', force=False, notifications_enabled=True)
+        run_service.assert_called_once_with(
+            'restart',
+            force=False,
+            notifications_enabled=True,
+            action_path=None,
+        )
 
 
 class GlobalLoggingArgumentTests(unittest.TestCase):

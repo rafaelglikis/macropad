@@ -27,9 +27,44 @@ def quote_exec_path(path: Path) -> str:
     return f'"{escaped}"'
 
 
-def render_unit(executable: Path, notifications_enabled: bool = True) -> str:
+def normalize_action_path(action_path: str, allow_home_specifier: bool = False) -> str:
+    validate_systemd_value(action_path)
+    entries = action_path.split(os.pathsep)
+    if any(not entry for entry in entries):
+        raise ValueError('action PATH entries cannot be empty')
+    if relative_entry := next(
+        (
+            entry
+            for entry in entries
+            if not Path(entry).is_absolute()
+            and not (allow_home_specifier and entry.startswith('%h/'))
+        ),
+        None,
+    ):
+        raise ValueError(f'action PATH entries must be absolute: {relative_entry!r}')
+    return os.pathsep.join(dict.fromkeys(entries))
+
+
+def quote_environment_value(name: str, value: str, escape_specifiers: bool = True) -> str:
+    validate_systemd_value(value)
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    if escape_specifiers:
+        escaped = escaped.replace('%', '%%')
+    return f'"{name}={escaped}"'
+
+
+def render_unit(
+    executable: Path,
+    notifications_enabled: bool = True,
+    action_path: str = ACTION_PATH,
+) -> str:
     if not executable.is_absolute():
         raise ValueError('service executable path must be absolute')
+    using_default_action_path = action_path == ACTION_PATH
+    action_path = normalize_action_path(
+        action_path,
+        allow_home_specifier=using_default_action_path,
+    )
     notification_option = '' if notifications_enabled else '--no-notifications '
     return (
         f'{GENERATED_MARKER}\n'
@@ -40,7 +75,7 @@ def render_unit(executable: Path, notifications_enabled: bool = True) -> str:
         '[Service]\n'
         'Type=simple\n'
         'Environment=PYTHONUNBUFFERED=1\n'
-        f'Environment=PATH={ACTION_PATH}\n'
+        f'Environment={quote_environment_value("PATH", action_path, not using_default_action_path)}\n'
         f'ExecStart={quote_exec_path(executable)} {notification_option}--verbose listen --watch\n'
         'KillMode=mixed\n'
         'TimeoutStopSec=10\n'

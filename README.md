@@ -596,6 +596,17 @@ environment and does not depend on a source checkout. Reinstalling updates a rec
 unit. Macropad refuses to replace an unrelated unit at that path unless
 `macropad service install --force` is used.
 
+By default, profile actions use a deterministic `PATH` containing standard system and user command
+directories. To capture the current shell's `PATH` in the generated unit instead, run:
+
+```bash
+macropad service install --action-path "$PATH"
+```
+
+The value is persisted until the next service installation. Every entry must be non-empty and
+absolute; duplicate entries are removed. Review the value first because profile actions resolve
+commands through these directories with your user permissions.
+
 Manage the installed unit through the CLI:
 
 ```bash

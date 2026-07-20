@@ -92,7 +92,11 @@ def _run_systemctl(*arguments: str) -> int:
     return subprocess.run(['systemctl', '--user', *arguments], check=False).returncode
 
 
-def install(force: bool = False, notifications_enabled: bool = True) -> int:
+def install(
+    force: bool = False,
+    notifications_enabled: bool = True,
+    action_path: str | None = None,
+) -> int:
     try:
         executable = service_unit.resolve_executable()
         unit_path = service_unit.resolve_unit_path()
@@ -101,7 +105,11 @@ def install(force: bool = False, notifications_enabled: bool = True) -> int:
             service_unit.validate_unit_ownership(Path(service_info.fragment_path), force)
         service_unit.install_unit(
             unit_path,
-            service_unit.render_unit(executable, notifications_enabled),
+            service_unit.render_unit(
+                executable,
+                notifications_enabled,
+                service_unit.ACTION_PATH if action_path is None else action_path,
+            ),
             force=force,
         )
     except (OSError, ValueError, RuntimeError) as error:
@@ -148,9 +156,14 @@ def uninstall() -> int:
     return result
 
 
-def run(action: str, force: bool = False, notifications_enabled: bool = True) -> int:
+def run(
+    action: str,
+    force: bool = False,
+    notifications_enabled: bool = True,
+    action_path: str | None = None,
+) -> int:
     if action == 'install':
-        return install(force, notifications_enabled)
+        return install(force, notifications_enabled, action_path)
     if action == 'uninstall':
         return uninstall()
     if action == 'logs':

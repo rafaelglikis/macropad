@@ -27,7 +27,25 @@ class SystemdUnitRendererTests(unittest.TestCase):
     def test_service_path_includes_standard_user_command_directories(self):
         rendered = service_unit.render_unit(Path('/opt/macropad/bin/macropad'))
 
-        self.assertIn(f'Environment=PATH={service_unit.ACTION_PATH}', rendered)
+        self.assertIn(f'Environment="PATH={service_unit.ACTION_PATH}"', rendered)
+
+    def test_custom_action_path_is_normalized_and_safely_rendered(self):
+        rendered = service_unit.render_unit(
+            Path('/opt/macropad/bin/macropad'),
+            action_path='/opt/My Tools/%build:/usr/bin:/opt/My Tools/%build',
+        )
+
+        self.assertIn('Environment="PATH=/opt/My Tools/%%build:/usr/bin"', rendered)
+
+    def test_custom_action_path_requires_nonempty_absolute_entries(self):
+        invalid_paths = ('', '/usr/bin:', 'relative:/usr/bin', '%h/bin:/usr/bin')
+
+        for action_path in invalid_paths:
+            with self.subTest(action_path=action_path), self.assertRaises(ValueError):
+                service_unit.render_unit(
+                    Path('/opt/macropad/bin/macropad'),
+                    action_path=action_path,
+                )
 
     def test_disabled_notifications_are_persisted_in_service_command(self):
         rendered = service_unit.render_unit(

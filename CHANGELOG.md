@@ -10,6 +10,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Marked devices with profiles in `macropad monitor` listings.
+- Added `macropad service install --action-path` for persisting an explicit profile-action `PATH`.
 
 ## [0.2.1] - 2026-07-20
 
