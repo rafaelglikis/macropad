@@ -12,6 +12,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Marked devices with profiles in `macropad monitor` listings.
 - Added `macropad service install --action-path` for persisting an explicit profile-action `PATH`.
 
+### Fixed
+
+- Started the user service with the graphical session so desktop actions inherit display access.
+
 ## [0.2.1] - 2026-07-20
 
 ### Fixed

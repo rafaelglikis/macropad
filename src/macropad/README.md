@@ -247,6 +247,8 @@ used with `service install`, the generated unit retains that global option.
 The generated systemd user unit gives actions a deterministic `PATH` containing `~/bin`,
 `~/.local/bin`, and standard system command directories. It invokes the console script from the
 environment that installed the unit and intentionally does not start Macropad through a login shell.
+The unit is ordered after and bound to `graphical-session.target`, allowing graphical actions to
+inherit the desktop environment without depending on a specific desktop environment.
 
 ## Service Installation Flow
 
