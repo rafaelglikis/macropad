@@ -70,7 +70,8 @@ def render_unit(
         f'{GENERATED_MARKER}\n'
         '[Unit]\n'
         'Description=Macropad Keyboard Interceptor\n'
-        'After=default.target\n'
+        'After=graphical-session.target\n'
+        'PartOf=graphical-session.target\n'
         '\n'
         '[Service]\n'
         'Type=simple\n'
@@ -83,7 +84,7 @@ def render_unit(
         'RestartSec=5\n'
         '\n'
         '[Install]\n'
-        'WantedBy=default.target\n'
+        'WantedBy=graphical-session.target\n'
     )
 
 

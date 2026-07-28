@@ -29,6 +29,14 @@ class SystemdUnitRendererTests(unittest.TestCase):
 
         self.assertIn(f'Environment="PATH={service_unit.ACTION_PATH}"', rendered)
 
+    def test_service_runs_with_the_graphical_session(self):
+        rendered = service_unit.render_unit(Path('/opt/macropad/bin/macropad'))
+
+        self.assertIn('After=graphical-session.target', rendered)
+        self.assertIn('PartOf=graphical-session.target', rendered)
+        self.assertIn('WantedBy=graphical-session.target', rendered)
+        self.assertNotIn('default.target', rendered)
+
     def test_custom_action_path_is_normalized_and_safely_rendered(self):
         rendered = service_unit.render_unit(
             Path('/opt/macropad/bin/macropad'),

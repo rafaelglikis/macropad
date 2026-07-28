@@ -596,6 +596,10 @@ environment and does not depend on a source checkout. Reinstalling updates a rec
 unit. Macropad refuses to replace an unrelated unit at that path unless
 `macropad service install --force` is used.
 
+The generated unit starts as part of the standard systemd graphical session, after the desktop has
+published variables such as `DISPLAY`, `WAYLAND_DISPLAY`, and `XAUTHORITY`. It stops with that
+session and remains desktop-environment independent.
+
 By default, profile actions use a deterministic `PATH` containing standard system and user command
 directories. To capture the current shell's `PATH` in the generated unit instead, run:
 
