@@ -197,13 +197,16 @@ sequenceDiagram
     participant Device as evdev device
     participant Interceptor as interceptor.listen
     participant Handler as KeyboardHandler
+    participant Context as context shell command
     participant Executor as ActionExecutor
     participant Shell as detached shell process
 
     Device->>Interceptor: InputEvent
     Interceptor->>Handler: handle(event)
     Interceptor->>Handler: tick()
-    Handler->>Handler: resolve layer override or base fallback and event state
+    Handler->>Context: query application ID on initial key press
+    Context-->>Handler: output within 100 ms or fallback
+    Handler->>Handler: resolve manual, context, or base layer and event state
     Handler->>Executor: submit(command)
     Executor->>Shell: Popen(shell=True, start_new_session=True)
     Interceptor->>Handler: tick on later loop iterations
@@ -217,13 +220,16 @@ triple-tap resolution use the profile's `multi_tap_ms` monotonic deadline and ar
 the same threadless mechanism. Omitted timing fields retain the 200 ms and 5,000 ms defaults. Hold
 recognition deliberately remains based on evdev kernel-repeat events rather than elapsed time.
 
-Active layers resolve their own binding first and fall back to the base binding unless their
-`LayerConfig` uses `fallback: none`. One-shot claims occur after this resolution, so an executed base
+Manual layers resolve first, followed by the command-selected context layer and then base bindings.
+Each `LayerConfig` stops fallback when set to `fallback: none`. Context commands are trusted shell
+strings run synchronously with captured output and a 100 ms timeout only on initial key presses; the
+resolved context is latched through repeats and release. Command failure or unknown output continues
+with normal lookup. One-shot claims occur after binding resolution, so an executed context or base
 fallback consumes the one-shot layer. Toggle and momentary activation-key events are intercepted
 before normal lookup: toggle release always deactivates its layer, while momentary release restores
 an immutable snapshot of the previous layer state. Nested snapshots discard states whose activation
-keys were released while hidden. Every transition increments the layer generation, preventing
-pending events from a replaced layer from executing later. Momentary transitions are intentionally
+keys were released while hidden. Every transition increments the layer generation, preventing pending
+events from a replaced manual layer from executing later. Momentary transitions are intentionally
 excluded from desktop notifications.
 
 Actions are trusted shell strings. Each worker may have at most eight active actions; additional
@@ -390,7 +396,9 @@ prevent headless startup or event handling.
 
 - `ProfileConfig` owns the device name, profile version, keyboard configuration, diagnostic source,
   deferred layer-reference paths, and explicit timing-field metadata used by merged validation.
-- `KeyboardConfig` owns base bindings, named layers, and effective timing configuration.
+- `KeyboardConfig` owns base bindings, named layers, effective timing, and optional context
+  configuration.
+- `ContextConfig` owns the trusted application query command and exact output-to-layer mappings.
 - `TimingConfig` owns the multi-tap resolution and one-shot layer deadlines in milliseconds.
 - `LayerConfig` owns layer bindings, effective base-fallback policy, and whether that policy was
   explicitly configured for fragment merging.

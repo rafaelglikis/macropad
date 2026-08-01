@@ -5,6 +5,7 @@ from evdev import ecodes
 
 from .config import (
     BindingConfig,
+    ContextConfig,
     KeyboardConfig,
     LayerConfig,
     LayerReference,
@@ -13,7 +14,7 @@ from .config import (
     TimingConfig,
 )
 
-PROFILE_FIELDS = {'device', 'version', 'timing', 'bindings', 'layers'}
+PROFILE_FIELDS = {'device', 'version', 'timing', 'context', 'bindings', 'layers'}
 EVENT_NAMES = {'up', 'down', 'hold', 'double_tap', 'triple_tap'}
 TOGGLE_EVENT_NAMES = {'up', 'double_tap', 'triple_tap'}
 TIMING_BOUNDS = {
@@ -111,11 +112,17 @@ def validate_profile_data(profile_data, source: str = '<profile>') -> ProfileCon
         timing, timing_fields = _parse_timing(profile_data['timing'], source)
     else:
         timing, timing_fields = TimingConfig(), frozenset()
+    context = _parse_context(profile_data['context'], source) if 'context' in profile_data else None
 
     return ProfileConfig(
         device=device,
         version=version,
-        keyboard=KeyboardConfig(bindings=bindings, layers=layers, timing=timing),
+        keyboard=KeyboardConfig(
+            bindings=bindings,
+            layers=layers,
+            timing=timing,
+            context=context,
+        ),
         source=source,
         layer_references=_collect_layer_references(profile_data),
         timing_fields=timing_fields,
@@ -147,6 +154,45 @@ def _parse_timing(timing, source: str) -> tuple[TimingConfig, frozenset[str]]:
             )
         values[field_name] = value
     return TimingConfig(**values), frozenset(timing)
+
+
+def _parse_context(context, source: str) -> ContextConfig:
+    if not isinstance(context, dict):
+        raise ProfileValidationError(source, 'context', 'expected a context mapping')
+
+    unknown_fields = set(context) - {'command', 'layers'}
+    if unknown_fields:
+        field_name = sorted(unknown_fields)[0]
+        raise ProfileValidationError(source, f'context.{field_name}', 'unsupported context field')
+
+    command = context.get('command')
+    if not isinstance(command, str) or not command.strip():
+        raise ProfileValidationError(source, 'context.command', 'expected a non-empty string')
+
+    context_layers = context.get('layers')
+    if not isinstance(context_layers, dict) or not context_layers:
+        raise ProfileValidationError(
+            source,
+            'context.layers',
+            'expected a non-empty mapping of command output to layer names',
+        )
+
+    parsed_layers = {}
+    for context_name, layer_name in context_layers.items():
+        if not isinstance(context_name, str) or not context_name.strip():
+            raise ProfileValidationError(
+                source,
+                'context.layers',
+                'command outputs must be non-empty strings',
+            )
+        if not isinstance(layer_name, str) or not layer_name.strip():
+            raise ProfileValidationError(
+                source,
+                f'context.layers.{context_name}',
+                'layer names must be non-empty strings',
+            )
+        parsed_layers[context_name] = layer_name
+    return ContextConfig(command=command, layers=parsed_layers)
 
 
 def _parse_bindings(
@@ -350,6 +396,12 @@ def _collect_layer_references(profile_data: dict) -> tuple[LayerReference, ...]:
             f'layers.{layer_name}.bindings',
             references,
         )
+    context = profile_data.get('context')
+    if context is not None:
+        references.extend(
+            LayerReference(name=layer_name, path=f'context.layers.{context_name}')
+            for context_name, layer_name in context['layers'].items()
+        )
     return tuple(references)
 
 
@@ -470,6 +522,7 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
     version = profile_datas[0].version
     merged_bindings = {}
     merged_layers = {}
+    merged_context = None
     default_timing = TimingConfig()
     merged_timing_values = {
         'multi_tap_ms': default_timing.multi_tap_ms,
@@ -515,6 +568,12 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
                 config.source,
             )
         merged_layers = _merge_layers(merged_layers, config.keyboard.layers, config.source)
+        if config.keyboard.context is not None:
+            merged_context = _merge_context(
+                merged_context,
+                config.keyboard.context,
+                config.source,
+            )
 
     merged_profile = ProfileConfig(
         device=device,
@@ -523,12 +582,39 @@ def merge_data(profile_datas: list[ProfileConfig]) -> ProfileConfig:
             bindings=merged_bindings,
             layers=merged_layers,
             timing=TimingConfig(**merged_timing_values),
+            context=merged_context,
         ),
         source='<merged profile>',
         timing_fields=merged_timing_fields,
     )
     _validate_merged_profile(profile_datas, merged_profile)
     return merged_profile
+
+
+def _merge_context(
+    target: ContextConfig | None,
+    source: ContextConfig,
+    source_name: str,
+) -> ContextConfig:
+    if target is None:
+        return source
+    if target.command != source.command:
+        raise ProfileValidationError(
+            source_name,
+            'context.command',
+            'conflicts with an earlier profile fragment',
+        )
+
+    layers = dict(target.layers)
+    for context_name, layer_name in source.layers.items():
+        if context_name in layers and layers[context_name] != layer_name:
+            raise ProfileValidationError(
+                source_name,
+                f'context.layers.{context_name}',
+                'conflicts with an earlier profile fragment',
+            )
+        layers[context_name] = layer_name
+    return ContextConfig(command=target.command, layers=layers)
 
 
 def prepare_profiles(profile_paths: list[str]) -> list[PreparedProfile]:
