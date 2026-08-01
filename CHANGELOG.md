@@ -7,6 +7,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added command-selected application context layers with manual-layer priority and safe fallback.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added

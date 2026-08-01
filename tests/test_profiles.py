@@ -98,6 +98,52 @@ class ProfileTests(unittest.TestCase):
 
                 self.assertEqual(f'timing.yml: {expected_message}', str(context.exception))
 
+    def test_context_is_validated_and_serialized(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                context={
+                    'command': 'kdotool getactivewindow getwindowclassname',
+                    'layers': {'org.kde.konsole': 'mod'},
+                }
+            )
+        )
+
+        self.assertEqual(
+            {
+                'command': 'kdotool getactivewindow getwindowclassname',
+                'layers': {'org.kde.konsole': 'mod'},
+            },
+            profile_config.keyboard.to_data()['context'],
+        )
+
+    def test_context_rejects_invalid_fields(self):
+        invalid_cases = (
+            (None, 'context: expected a context mapping'),
+            ('command', 'context: expected a context mapping'),
+            ({}, 'context.command: expected a non-empty string'),
+            (
+                {'command': 'active-window', 'layers': {}},
+                'context.layers: expected a non-empty mapping of command output to layer names',
+            ),
+            (
+                {'command': 'active-window', 'layers': {'app': ''}},
+                'context.layers.app: layer names must be non-empty strings',
+            ),
+            (
+                {'command': 'active-window', 'layers': {'app': 'mod'}, 'extra': True},
+                'context.extra: unsupported context field',
+            ),
+        )
+        for context_data, expected_message in invalid_cases:
+            with self.subTest(context=context_data):
+                with self.assertRaises(profiles.ProfileValidationError) as context:
+                    profiles.validate_profile_data(
+                        self._profile_data(context=context_data),
+                        source='context.yml',
+                    )
+
+                self.assertEqual(f'context.yml: {expected_message}', str(context.exception))
+
     def test_inline_layers_are_normalized_into_keyboard_config(self):
         profile_config = profiles.validate_profile_data(self._profile_data())
 
@@ -384,16 +430,26 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('line 5', message)
 
     def test_profile_config_is_deeply_immutable(self):
-        profile_config = profiles.validate_profile_data(self._profile_data())
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                context={
+                    'command': 'active-window',
+                    'layers': {'org.kde.konsole': 'mod'},
+                }
+            )
+        )
 
         self.assertIsInstance(profile_config.keyboard.bindings, FrozenDict)
         self.assertIsInstance(profile_config.keyboard.layers, FrozenDict)
         self.assertIsInstance(profile_config.keyboard.bindings['KEY_A'].actions, FrozenDict)
+        self.assertIsInstance(profile_config.keyboard.context.layers, FrozenDict)
 
         with self.assertRaises(TypeError):
             profile_config.keyboard.bindings['KEY_B'] = profile_config.keyboard.bindings['KEY_A']
         with self.assertRaises(TypeError):
             profile_config.keyboard.bindings['KEY_A'].actions['up'] = ('changed-command',)
+        with self.assertRaises(TypeError):
+            profile_config.keyboard.context.layers['org.kde.konsole'] = 'changed-layer'
 
     def test_profile_config_remains_picklable(self):
         profile_config = profiles.validate_profile_data(
@@ -463,6 +519,89 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(350, merged.keyboard.timing.multi_tap_ms)
         self.assertEqual(7000, merged.keyboard.timing.one_shot_timeout_ms)
+
+    def test_merge_combines_context_mappings_from_profile_fragments(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                layers={'mod': {'fallback': 'base'}},
+                context={
+                    'command': 'active-window',
+                    'layers': {'org.kde.konsole': 'mod'},
+                },
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                layers={'mod': {'fallback': 'base'}},
+                context={
+                    'command': 'active-window',
+                    'layers': {'jetbrains-phpstorm': 'mod'},
+                },
+            ),
+            source='second.yml',
+        )
+
+        merged = profiles.merge_data([first, second])
+
+        self.assertEqual(
+            {
+                'org.kde.konsole': 'mod',
+                'jetbrains-phpstorm': 'mod',
+            },
+            dict(merged.keyboard.context.layers),
+        )
+
+    def test_merge_reports_context_command_conflict(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                context={'command': 'first-command', 'layers': {'first-app': 'mod'}},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                context={'command': 'second-command', 'layers': {'second-app': 'mod'}},
+            ),
+            source='second.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([first, second])
+
+        self.assertEqual(
+            'second.yml: context.command: conflicts with an earlier profile fragment',
+            str(context.exception),
+        )
+
+    def test_merge_reports_context_mapping_conflict(self):
+        first = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                context={'command': 'active-window', 'layers': {'app': 'mod'}},
+            ),
+            source='first.yml',
+        )
+        second = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_B': 'b-command'},
+                layers={'other': {'fallback': 'base'}},
+                context={'command': 'active-window', 'layers': {'app': 'other'}},
+            ),
+            source='second.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([first, second])
+
+        self.assertEqual(
+            'second.yml: context.layers.app: conflicts with an earlier profile fragment',
+            str(context.exception),
+        )
 
     def test_merge_reports_timing_conflict_from_later_fragment(self):
         first = profiles.validate_profile_data(
@@ -586,6 +725,48 @@ class ProfileTests(unittest.TestCase):
             "broken.yml: bindings.KEY_A.up: references unknown layer 'missing'",
             str(context.exception),
         )
+
+    def test_merge_rejects_context_reference_to_unknown_layer(self):
+        profile_config = profiles.validate_profile_data(
+            self._profile_data(
+                context={
+                    'command': 'active-window',
+                    'layers': {'org.kde.konsole': 'missing'},
+                }
+            ),
+            source='broken.yml',
+        )
+
+        with self.assertRaises(profiles.ProfileValidationError) as context:
+            profiles.merge_data([profile_config])
+
+        self.assertEqual(
+            "broken.yml: context.layers.org.kde.konsole: references unknown layer 'missing'",
+            str(context.exception),
+        )
+
+    def test_merge_allows_context_layer_defined_by_another_fragment(self):
+        context_fragment = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={'KEY_A': 'a-command'},
+                context={
+                    'command': 'active-window',
+                    'layers': {'org.kde.konsole': 'terminal'},
+                },
+            ),
+            source='context.yml',
+        )
+        layer_fragment = profiles.validate_profile_data(
+            self._profile_data(
+                bindings={},
+                layers={'terminal': {'bindings': {'KEY_B': 'terminal-command'}}},
+            ),
+            source='layer.yml',
+        )
+
+        merged = profiles.merge_data([context_fragment, layer_fragment])
+
+        self.assertEqual('terminal', merged.keyboard.context.layers['org.kde.konsole'])
 
     def test_merge_reports_original_path_for_unknown_inline_layer_reference(self):
         profile_config = profiles.validate_profile_data(

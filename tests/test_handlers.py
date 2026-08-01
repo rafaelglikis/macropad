@@ -1,3 +1,5 @@
+import signal
+import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
@@ -27,7 +29,7 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
         self.run_command = self.action_executor.submit
 
     @staticmethod
-    def _keyboard_config(bindings, timing=None, layers=None):
+    def _keyboard_config(bindings, timing=None, layers=None, context=None):
         profile_data = {
             'device': 'Test Device',
             'version': 1,
@@ -37,6 +39,8 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
             profile_data['timing'] = timing
         if layers is not None:
             profile_data['layers'] = layers
+        if context is not None:
+            profile_data['context'] = context
         return profiles.validate_profile_data(profile_data).keyboard
 
     def _create_handler(self, layer_binding, timing=None):
@@ -121,6 +125,172 @@ class KeyboardHandlerLayerTests(unittest.TestCase):
             event='up',
             layer='base',
         )
+
+    def test_context_layer_is_selected_on_press_and_latched_until_release(self):
+        context_resolver = Mock(side_effect=['org.kde.konsole', 'jetbrains-phpstorm'])
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_A': 'base-command'},
+                layers={
+                    'konsole': {'bindings': {'KEY_A': 'konsole-command'}},
+                    'phpstorm': {'bindings': {'KEY_A': 'phpstorm-command'}},
+                },
+                context={
+                    'command': 'active-window-class',
+                    'layers': {
+                        'org.kde.konsole': 'konsole',
+                        'jetbrains-phpstorm': 'phpstorm',
+                    },
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+            context_resolver=context_resolver,
+        )
+
+        handler.handle(self._event(ecodes.KEY_A, 1))
+        handler.handle(self._event(ecodes.KEY_A, 0))
+        self.assert_submitted_commands('konsole-command')
+        context_resolver.assert_called_once_with('active-window-class')
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('konsole-command', 'phpstorm-command')
+        self.assertEqual(2, context_resolver.call_count)
+
+    def test_manual_layer_takes_priority_over_context_layer(self):
+        context_resolver = Mock(return_value='org.kde.konsole')
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer manual',
+                    'KEY_A': 'base-command',
+                },
+                layers={
+                    'manual': {'bindings': {'KEY_A': 'manual-command'}},
+                    'konsole': {'bindings': {'KEY_A': 'konsole-command'}},
+                },
+                context={
+                    'command': 'active-window-class',
+                    'layers': {'org.kde.konsole': 'konsole'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+            context_resolver=context_resolver,
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('manual-command')
+
+    def test_manual_layer_falls_back_to_context_layer_before_base(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {
+                    'KEY_SPACE': '^layer manual',
+                    'KEY_A': 'base-command',
+                },
+                layers={
+                    'manual': {'fallback': 'base'},
+                    'konsole': {'bindings': {'KEY_A': 'konsole-command'}},
+                },
+                context={
+                    'command': 'active-window-class',
+                    'layers': {'org.kde.konsole': 'konsole'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+            context_resolver=Mock(return_value='org.kde.konsole'),
+        )
+        self._tap(handler, ecodes.KEY_SPACE)
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('konsole-command')
+
+    def test_unknown_context_falls_back_to_base_binding(self):
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_A': 'base-command'},
+                layers={'konsole': {'bindings': {'KEY_A': 'konsole-command'}}},
+                context={
+                    'command': 'active-window-class',
+                    'layers': {'org.kde.konsole': 'konsole'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+            context_resolver=Mock(return_value='unknown-app'),
+        )
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('base-command')
+
+    def test_context_command_output_selects_layer_with_bounded_lookup(self):
+        start_context_command = patch('macropad.handlers.subprocess.Popen').start()
+        process = start_context_command.return_value
+        process.communicate.return_value = ('org.kde.konsole\n', '')
+        process.returncode = 0
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_A': 'base-command'},
+                layers={'konsole': {'bindings': {'KEY_A': 'konsole-command'}}},
+                context={
+                    'command': 'active-window-class',
+                    'layers': {'org.kde.konsole': 'konsole'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('konsole-command')
+        start_context_command.assert_called_once_with(
+            'active-window-class',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            start_new_session=True,
+        )
+        process.communicate.assert_called_once_with(timeout=0.1)
+
+    def test_context_command_timeout_kills_process_group_and_falls_back(self):
+        start_context_command = patch('macropad.handlers.subprocess.Popen').start()
+        kill_process_group = patch('macropad.handlers.os.killpg').start()
+        process = start_context_command.return_value
+        process.pid = 42
+        process.communicate.side_effect = subprocess.TimeoutExpired('active-window-class', 0.1)
+        process.wait.side_effect = subprocess.TimeoutExpired('active-window-class', 0.1)
+        handler = KeyboardHandler(
+            self._keyboard_config(
+                {'KEY_A': 'base-command'},
+                layers={'konsole': {'bindings': {'KEY_A': 'konsole-command'}}},
+                context={
+                    'command': 'active-window-class',
+                    'layers': {'org.kde.konsole': 'konsole'},
+                },
+            ),
+            clock=self.clock,
+            action_executor=self.action_executor,
+        )
+
+        with self.assertLogs('macropad.handlers', level='WARNING'):
+            self._tap(handler, ecodes.KEY_A)
+
+        self.assert_submitted_commands('base-command')
+        kill_process_group.assert_called_once_with(42, signal.SIGKILL)
+        process.stdout.close.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=0.1)
+        process.communicate.assert_called_once_with(timeout=0.1)
 
     def test_active_layer_falls_back_to_base_binding_by_default(self):
         handler = KeyboardHandler(

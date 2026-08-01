@@ -215,9 +215,10 @@ bindings:
       - logger 'Macropad B released'
 ```
 
-Unknown top-level fields, key names, event names, layer fields, and duplicate YAML keys are errors.
-`device` must be a non-empty string. `version` may be the string `'1'` or integer `1`; omitted
-versions default to 1. A complete merged device configuration must contain at least one base action.
+Unknown top-level fields, context fields, key names, event names, layer fields, and duplicate YAML
+keys are errors. `device` must be a non-empty string. `version` may be the string `'1'` or integer
+`1`; omitted versions default to 1. A complete merged device configuration must contain at least one
+base action.
 
 Use any key name exported by Linux evdev, such as `KEY_A`, `KEY_UP`, or `KEY_PLAYPAUSE`. A command
 string is shorthand for an `up` action. An event can run one command string or a non-empty list of
@@ -282,6 +283,41 @@ also delays single-tap and hold resolution for bindings that contain those event
 detection itself remains based on evdev kernel-repeat events, so this setting does not turn hold into
 a duration-based action. One-shot timing is cancelled once a key claims the layer; that key completes
 normally and then deactivates the layer.
+
+### Application Context
+
+An optional context command can select a layer from the command's output when a key is pressed. This
+supports desktop-specific active-window tools without coupling Macropad to one desktop environment:
+
+```yaml
+device: My Macro Keyboard
+version: '1'
+context:
+  command: kdotool getactivewindow getwindowclassname
+  layers:
+    org.kde.konsole: terminal
+    jetbrains-phpstorm: editor
+bindings:
+  KEY_F1: notify-send Macropad Base
+layers:
+  terminal:
+    bindings:
+      KEY_F1: notify-send Macropad Terminal
+  editor:
+    bindings:
+      KEY_F1: notify-send Macropad Editor
+```
+
+The command is a trusted shell string, like an action. Its trimmed standard output must exactly match
+a key under `context.layers`; unknown or empty output uses normal bindings. Macropad waits at most
+100 ms for the command. Start failures, timeouts, and nonzero exit statuses are logged and fall back
+to normal bindings rather than blocking input indefinitely.
+
+Context is resolved only for the initial key press and remains attached through repeats and release,
+so an action that changes focus cannot change the matching release action. A manually activated
+layer has priority, followed by the context layer and then base bindings. Each layer's `fallback`
+setting still controls whether lookup continues. Context mappings may reference layers from another
+profile fragment; fragments must use the same command, and conflicting mappings are rejected.
 
 ### Layers
 

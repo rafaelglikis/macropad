@@ -1,5 +1,9 @@
 import logging
+import os
+import signal
+import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import evdev
@@ -10,6 +14,7 @@ from .actions import ActionExecutor
 from .config import BindingConfig, KeyboardConfig
 
 DELAYED_EVENTS = {'hold', 'double_tap', 'triple_tap'}
+CONTEXT_COMMAND_TIMEOUT_SECONDS = 0.1
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +40,7 @@ class KeyboardHandler:
         clock=time.monotonic,
         action_executor: ActionExecutor | None = None,
         device: str | None = None,
+        context_resolver: Callable[[str], str | None] | None = None,
     ):
         self._clock = clock
         self.config = config
@@ -44,6 +50,7 @@ class KeyboardHandler:
         )
         self._multi_tap_seconds = config.timing.multi_tap_ms / 1000
         self._one_shot_timeout_seconds = config.timing.one_shot_timeout_ms / 1000
+        self._context_resolver = context_resolver or self._run_context_command
 
         self.active_layer = None
         self.layer_activation_key = None
@@ -56,6 +63,7 @@ class KeyboardHandler:
         self._layer_generation = 0
         self.event_logs = {}
         self._pending_events = {}
+        self._key_context_layers = {}
 
     def handle(self, e: InputEvent):
         event = evdev.categorize(e)
@@ -63,31 +71,36 @@ class KeyboardHandler:
             return
 
         code = evdev.ecodes.KEY[e.code]
-        if self._handle_activation_key_event(event, code):
-            return
+        try:
+            if self._handle_activation_key_event(event, code):
+                return
 
-        binding, resolved_layer = self._resolve_binding(code)
-        if binding is None:
-            logger.debug(
-                'no key binding for input event',
-                extra=self._context(key=code, event=str(event)),
+            context_layer = self._context_layer_for_event(event, code)
+            binding, resolved_layer = self._resolve_binding(code, context_layer)
+            if binding is None:
+                logger.debug(
+                    'no key binding for input event',
+                    extra=self._context(key=code, event=str(event)),
+                )
+                return
+
+            layer_generation = self._layer_generation if self.active_layer else None
+            if not self._claim_one_shot_layer(code):
+                return
+
+            self.event_logs.setdefault(code, []).append(event)
+            is_simple_binding = len(binding.actions) == 1 and binding.actions.keys().isdisjoint(
+                DELAYED_EVENTS
             )
-            return
+            if is_simple_binding:
+                self.handle_event_now(event, code, binding, layer_generation, resolved_layer)
+            else:
+                self.handle_event(event, code, binding, layer_generation, resolved_layer)
+        finally:
+            if event.event.value == event.key_up:
+                self._key_context_layers.pop(code, None)
 
-        layer_generation = self._layer_generation if self.active_layer else None
-        if not self._claim_one_shot_layer(code):
-            return
-
-        self.event_logs.setdefault(code, []).append(event)
-        is_simple_binding = len(binding.actions) == 1 and binding.actions.keys().isdisjoint(
-            DELAYED_EVENTS
-        )
-        if is_simple_binding:
-            self.handle_event_now(event, code, binding, layer_generation, resolved_layer)
-        else:
-            self.handle_event(event, code, binding, layer_generation, resolved_layer)
-
-    def _resolve_binding(self, code):
+    def _resolve_binding(self, code, context_layer=None):
         if self.active_layer:
             layer = self.config.layers[self.active_layer]
             if code in layer.bindings:
@@ -96,18 +109,86 @@ class KeyboardHandler:
                     extra=self._context(layer=self.active_layer, key=code),
                 )
                 return layer.bindings[code], self.active_layer
-            if layer.fallback == 'base' and code in self.config.bindings:
+            if layer.fallback == 'none':
+                return None, None
+
+        if context_layer and context_layer != self.active_layer:
+            layer = self.config.layers[context_layer]
+            if code in layer.bindings:
                 logger.debug(
-                    'using base fallback binding',
-                    extra=self._context(layer=self.active_layer, key=code),
+                    'using context layer binding',
+                    extra=self._context(layer=context_layer, key=code),
                 )
-                return self.config.bindings[code], 'base'
-            return None, None
+                return layer.bindings[code], context_layer
+            if layer.fallback == 'none':
+                return None, None
 
         if code in self.config.bindings:
-            logger.debug('using base binding', extra=self._context(key=code))
+            if self.active_layer or context_layer:
+                logger.debug(
+                    'using base fallback binding',
+                    extra=self._context(layer=self.active_layer or context_layer, key=code),
+                )
+            else:
+                logger.debug('using base binding', extra=self._context(key=code))
             return self.config.bindings[code], 'base'
         return None, None
+
+    def _context_layer_for_event(self, event, code):
+        context = self.config.context
+        if context is None:
+            return None
+        if event.event.value == event.key_down or code not in self._key_context_layers:
+            context_name = self._context_resolver(context.command)
+            self._key_context_layers[code] = context.layers.get(context_name)
+        return self._key_context_layers[code]
+
+    def _run_context_command(self, command):
+        try:
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                start_new_session=True,
+            )
+        except OSError as error:
+            logger.warning(
+                'context command failed',
+                extra=self._context(command=command, error=str(error)),
+            )
+            return None
+        try:
+            stdout, _ = process.communicate(timeout=CONTEXT_COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                if process.stdout is not None:
+                    process.stdout.close()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=CONTEXT_COMMAND_TIMEOUT_SECONDS)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            logger.warning(
+                'context command failed',
+                extra=self._context(command=command, error=str(error)),
+            )
+            return None
+        if process.returncode != 0:
+            logger.warning(
+                'context command failed',
+                extra=self._context(command=command, exit_status=process.returncode),
+            )
+            return None
+        return stdout.strip() or None
 
     def handle_event(
         self,

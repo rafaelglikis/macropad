@@ -95,10 +95,26 @@ class TimingConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    command: str
+    layers: FrozenDict[str, str]
+
+    def __post_init__(self):
+        object.__setattr__(self, 'layers', FrozenDict(self.layers))
+
+    def to_data(self) -> dict:
+        return {
+            'command': self.command,
+            'layers': dict(self.layers),
+        }
+
+
+@dataclass(frozen=True)
 class KeyboardConfig:
     bindings: FrozenDict[str, BindingConfig]
     layers: FrozenDict[str, LayerConfig]
     timing: TimingConfig = field(default_factory=TimingConfig)
+    context: ContextConfig | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'bindings', FrozenDict(self.bindings))
@@ -114,6 +130,8 @@ class KeyboardConfig:
             data['layers'] = {
                 layer_name: layer.to_data() for layer_name, layer in self.layers.items()
             }
+        if self.context is not None:
+            data['context'] = self.context.to_data()
         return data
 
 
