@@ -1,6 +1,6 @@
 [project]
 name = "poor-mans-macropad"
-version = "0.2.1"
+version = "0.3.0"
 description = "Turn every keyboard into a Macropad"
 readme = "README.md"
 license = "MIT"
