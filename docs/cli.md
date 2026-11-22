@@ -1,5 +1,46 @@
 # Commands
 
+Listen using profiles from the default configuration directory:
+
+```bash
+macropad listen
+macropad --verbose listen
+macropad --debug listen
+```
+
+Validate profiles without opening or grabbing input devices:
+
+```bash
+macropad validate
+macropad validate profile.yml
+macropad validate --directory ./profiles
+```
+
+Check input permissions, profile access, and the runtime environment:
+
+```bash
+macropad doctor
+```
+
+Inspect live keyboard worker and device state:
+
+```bash
+macropad status
+```
+
+Create a first profile through guided device and key detection:
+
+```bash
+macropad init
+```
+
+List readable input devices and stream key names without grabbing the keyboard:
+
+```bash
+macropad monitor
+macropad monitor 'Exact Device Name'
+```
+
 ## Diagnostics
 
 Run `macropad doctor` before starting the service to check input-device enumeration, open and
