@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "evdev>=1.6.1",
+    "pyudev>=0.24.3",
     "pyyaml>=6.0.1",
     "watchdog>=3.0.0",
 ]

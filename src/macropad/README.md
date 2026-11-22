@@ -100,6 +100,7 @@ flowchart TD
     Handler --> Notifications
 
     Interceptor --> Evdev[evdev]
+    Interceptor --> Udev[pyudev input-device monitor]
     Actions --> Shell[detached shell processes]
     Notifications -. optional .-> Notify2[notify2 and DBus]
 ```
@@ -115,7 +116,8 @@ system adapters. In particular:
   `service_unit.py` owns unit rendering and filesystem changes without invoking systemd.
 - `supervisor.py` owns processes but does not process keyboard events.
 - `worker.py` is the boundary where immutable configuration becomes mutable runtime state.
-- `interceptor.py` owns evdev resources but does not construct or shut down handlers.
+- `interceptor.py` owns evdev resources and the worker-local udev monitor but does not construct or
+  shut down handlers.
 - `handlers.py` may submit actions and notifications but must not manage worker processes.
 - `actions.py`, `notifications.py`, and `interceptor.py` are adapters to operating-system services;
   the notification adapter must remain importable without its optional backend dependencies.
@@ -152,8 +154,8 @@ current `/dev/input/event*` nodes with that name.
    child process, forwarding logging level and action-output options.
 7. The worker configures logging, constructs `ActionExecutor` and `KeyboardHandler`, then calls
    `interceptor.listen()`.
-8. The interceptor waits for matching devices, opens and grabs every matching event node, and begins
-   forwarding input events.
+8. The interceptor subscribes to udev input events before its initial scan, opens and grabs every
+   matching event node, and begins forwarding input events.
 9. The worker publishes deduplicated state transitions to the parent, which serves snapshots through
    the local runtime status socket.
 
@@ -195,12 +197,16 @@ evdev handles or duplicate profile merge rules.
 ```mermaid
 sequenceDiagram
     participant Device as evdev device
+    participant Udev as udev input monitor
     participant Interceptor as interceptor.listen
     participant Handler as KeyboardHandler
     participant Context as context shell command
     participant Executor as ActionExecutor
     participant Shell as detached shell process
 
+    Udev->>Interceptor: event-node add/remove/change
+    Interceptor->>Interceptor: close removed handles and schedule discovery
+    Interceptor->>Device: open and grab newly matching paths
     Device->>Interceptor: InputEvent
     Interceptor->>Handler: handle(event)
     Interceptor->>Handler: tick()
@@ -274,10 +280,17 @@ closes every probe. Paths that disappear during enumeration are ignored. Permiss
 other open errors are logged once per unresolved operation and path rather than silently treated as
 an absent device or repeatedly flooding the journal.
 
-The listener opens and exclusively grabs all paths matching the configured keyboard name. When a
-path reports `ENODEV`, it is closed and removed. The listener rescans only after every matching path
-has gone; it intentionally does not acquire an additional path while another matching path remains
-connected.
+The listener subscribes to a worker-local `pyudev` input monitor before its initial scan, then opens
+and exclusively grabs all paths matching the configured keyboard name. The existing threadless input
+loop checks queued udev events without blocking. Event-node add, remove, and change events schedule
+discovery, with scans spaced at least 300 ms apart to coalesce hotplug bursts. Idle listeners do not
+repeat scans, even when waiting for their first device.
+
+A udev removal or an evdev `ENODEV` closes and removes the old handle, allowing a replacement to reuse
+the same path. Newly matching paths are acquired while healthy handles remain attached. Read loss,
+scan errors, and disappearance before grabbing schedule another scan; udev add events trigger
+discovery when a device returns later. Monitor failures propagate to worker supervision for restart.
+Shutdown closes input handles and releases the monitor's netlink socket.
 
 `probe_device_access()` briefly opens, grabs, ungrabs, and closes each current event device for
 `macropad doctor`. It records `EACCES`, `EBUSY`, `ENODEV`, and other operation failures as data so the
@@ -288,8 +301,8 @@ failure otherwise; stopping the service and rerunning the check disambiguates ow
 
 `interceptor.monitor()` opens every current path matching an exact device name without calling
 `grab()`. It rescans while other paths remain connected, reports each connection and disconnection,
-and reacquires matching paths after reconnect. This monitoring behavior is independent from the
-listener's intentional policy of rescanning only after all matching paths are gone.
+and reacquires matching paths after reconnect. This diagnostic command retains periodic scanning;
+the service listener uses udev-triggered discovery.
 The command reports when the Macropad service is active because its configured devices are already
 exclusively grabbed and cannot deliver events to the non-grabbing monitor until the service stops.
 

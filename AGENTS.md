@@ -28,7 +28,7 @@
 ## Intentional Constraints
 
 - Device identity is keyboard name only, and all matching event nodes are attached. Structured hardware selectors are deferred.
-- The listener intentionally rescans only after all matching paths are gone. Selector-based monitoring and reacquiring a new path while another matching path remains connected are deferred; do not implement them without a concrete requirement.
+- The listener uses a worker-local udev monitor to rescan on input-device changes, including partial reconnects while other matching paths remain attached. Keep idle discovery event-driven and delayed key/layer transitions threadless.
 - Actions are trusted shell strings executed detached with `shell=True`; explicit argument-array actions were declined. Preserve the per-worker limit of eight concurrent actions and drop rather than queue actions at the limit.
 - Notification dependencies and initialization are optional: headless startup must continue when the extra, session bus, or notification service is absent. Backend import or runtime failure is cached per process to avoid repeated warnings.
 

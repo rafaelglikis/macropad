@@ -385,6 +385,215 @@ class DeviceMonitorTests(unittest.TestCase):
 
 
 class ListenerTests(unittest.TestCase):
+    def setUp(self):
+        interceptor._reported_device_errors.clear()
+        context = patch('macropad.interceptor.pyudev.Context')
+        context.start()
+        self.addCleanup(context.stop)
+        monitor = patch('macropad.interceptor.pyudev.Monitor.from_netlink')
+        self.hotplug_monitor = monitor.start().return_value
+        self.hotplug_monitor.poll.return_value = None
+        self.addCleanup(monitor.stop)
+
+    def run_iterations(self, times, scan, open_device, handler=None, status_callback=None):
+        shutdown_event = threading.Event()
+        clock = Mock()
+        clock.monotonic.side_effect = times
+        iterations = 0
+
+        def sleep(seconds):
+            nonlocal iterations
+            iterations += 1
+            if iterations == len(times):
+                shutdown_event.set()
+
+        clock.sleep.side_effect = sleep
+        with (
+            patch('macropad.interceptor.matching_device_paths', scan),
+            patch('macropad.interceptor.InputDevice', open_device),
+            patch('macropad.interceptor.time', clock),
+        ):
+            interceptor.listen('Macro Keyboard', handler or Mock(), shutdown_event, status_callback)
+
+    def test_idle_listener_does_not_repeat_scans_even_when_waiting(self):
+        for connected in (False, True):
+            with self.subTest(connected=connected):
+                device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+
+                def scan_paths(name, error_callback, device=device, connected=connected):
+                    self.hotplug_monitor.start.assert_called()
+                    return [device.path] if connected else []
+
+                scan = Mock(side_effect=scan_paths)
+                self.run_iterations([0.0, 1.0, 60.0], scan, Mock(return_value=device))
+                scan.assert_called_once()
+
+    def test_partial_disconnect_reconnects_on_udev_add_with_same_or_new_path(self):
+        for replacement_path in ('/dev/input/event1', '/dev/input/event3'):
+            with self.subTest(replacement_path=replacement_path):
+                lost = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+                healthy = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
+                replacement = FakeInputDevice(replacement_path, 'Macro Keyboard')
+                lost.read_one = Mock(side_effect=OSError(errno.ENODEV, 'device lost'))
+                event = SimpleNamespace(type=1, code=30, value=1)
+                healthy.read_one = Mock(side_effect=[event, None, event, None, event, None])
+                replacement.read_one = Mock(side_effect=[event, None])
+                healthy.grab = Mock()
+                handler = Mock()
+                self.hotplug_monitor.poll.side_effect = [
+                    None,
+                    None,
+                    SimpleNamespace(action='add', device_node=replacement.path),
+                    None,
+                ]
+                scan = Mock(
+                    side_effect=[
+                        [lost.path, healthy.path],
+                        [healthy.path],
+                        [healthy.path, replacement.path],
+                    ]
+                )
+                open_device = Mock(side_effect=[lost, healthy, replacement])
+
+                self.run_iterations([1.0, 1.4, 2.0], scan, open_device, handler)
+
+                self.assertEqual(3, scan.call_count)
+                self.assertEqual(
+                    [call(lost.path), call(healthy.path), call(replacement.path)],
+                    open_device.call_args_list,
+                )
+                healthy.grab.assert_called_once_with()
+                self.assertEqual(4, handler.handle.call_count)
+                self.assertTrue(replacement.grabbed)
+                self.assertTrue(all(device.closed for device in (lost, healthy, replacement)))
+
+    def test_queued_remove_and_add_replaces_reused_path_before_read_fails(self):
+        old = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        replacement = FakeInputDevice(old.path, old.name)
+        old.read_one = Mock(return_value=None)
+        self.hotplug_monitor.poll.side_effect = [
+            None,
+            SimpleNamespace(action='remove', device_node=old.path),
+            SimpleNamespace(action='add', device_node=old.path),
+            None,
+        ]
+        scan = Mock(return_value=[old.path])
+
+        self.run_iterations([1.0, 1.4], scan, Mock(side_effect=[old, replacement]))
+
+        old.read_one.assert_called_once_with()
+        self.assertTrue(old.closed)
+        self.assertTrue(replacement.grabbed)
+        self.assertTrue(replacement.closed)
+
+    def test_hotplug_burst_is_coalesced_without_reopening_healthy_device(self):
+        healthy = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        added = FakeInputDevice('/dev/input/event2', 'Macro Keyboard')
+        healthy.grab = Mock()
+        self.hotplug_monitor.poll.side_effect = [
+            None,
+            SimpleNamespace(action='add', device_node=added.path),
+            SimpleNamespace(action='change', device_node=added.path),
+            None,
+            None,
+            None,
+            None,
+        ]
+        scan = Mock(side_effect=[[healthy.path], [healthy.path, added.path]])
+        status = Mock()
+
+        self.run_iterations(
+            [1.0, 1.01, 1.1, 1.4, 60.0],
+            scan,
+            Mock(side_effect=[healthy, added]),
+            status_callback=status,
+        )
+
+        self.assertEqual(2, scan.call_count)
+        healthy.grab.assert_called_once_with()
+        self.assertTrue(added.grabbed)
+        self.assertEqual(
+            [
+                call('opening', (healthy.path,), None),
+                call('listening', (healthy.path,), None),
+                call('opening', (healthy.path, added.path), None),
+                call('listening', (healthy.path, added.path), None),
+            ],
+            status.call_args_list,
+        )
+
+    def test_waiting_listener_acquires_late_device(self):
+        added = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        self.hotplug_monitor.poll.side_effect = [
+            None,
+            SimpleNamespace(action='add', device_node=added.path),
+            None,
+        ]
+        scan = Mock(side_effect=[[], [added.path]])
+
+        self.run_iterations([1.0, 60.0], scan, Mock(return_value=added))
+
+        self.assertTrue(added.grabbed)
+
+    def test_non_event_nodes_and_unrelated_actions_do_not_trigger_scans(self):
+        self.hotplug_monitor.poll.side_effect = [
+            None,
+            SimpleNamespace(action='add', device_node=None),
+            SimpleNamespace(action='add', device_node='/dev/input/mouse0'),
+            SimpleNamespace(action='bind', device_node='/dev/input/event1'),
+            None,
+        ]
+        scan = Mock(return_value=[])
+        self.run_iterations([1.0, 2.0], scan, Mock())
+        scan.assert_called_once()
+
+    def test_disappearance_before_grab_retries_without_another_udev_event(self):
+        gone = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        gone.grab = Mock(side_effect=OSError(errno.ENODEV, 'device lost'))
+        replacement = FakeInputDevice(gone.path, gone.name)
+        scan = Mock(return_value=[gone.path])
+
+        self.run_iterations([1.0, 1.4], scan, Mock(side_effect=[gone, replacement]))
+
+        self.assertTrue(gone.closed)
+        self.assertTrue(replacement.grabbed)
+
+    def test_scan_permission_failure_retries_after_access_is_restored(self):
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        error = OSError(errno.EACCES, 'permission denied')
+        status = Mock()
+        attempts = 0
+
+        def scan_paths(name, error_callback):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                error_callback(device.path, error)
+                return []
+            return [device.path]
+
+        self.run_iterations(
+            [1.0, 1.4],
+            Mock(side_effect=scan_paths),
+            Mock(return_value=device),
+            status_callback=status,
+        )
+
+        self.assertTrue(device.grabbed)
+        self.assertEqual(call('error', (device.path,), str(error)), status.call_args_list[0])
+        self.assertEqual(call('listening', (device.path,), None), status.call_args_list[-1])
+
+    def test_monitor_failure_closes_grabbed_devices_and_propagates(self):
+        device = FakeInputDevice('/dev/input/event1', 'Macro Keyboard')
+        self.hotplug_monitor.poll.side_effect = [None, OSError(errno.EIO, 'monitor failed')]
+
+        with self.assertRaisesRegex(OSError, 'monitor failed'):
+            self.run_iterations(
+                [1.0, 1.4], Mock(return_value=[device.path]), Mock(return_value=device)
+            )
+
+        self.assertTrue(device.closed)
+
     def test_scan_permission_failure_reports_error_instead_of_waiting(self):
         shutdown_event = threading.Event()
         status_callback = Mock()

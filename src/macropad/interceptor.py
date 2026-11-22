@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import evdev
+import pyudev
 from evdev import InputDevice, ecodes
 
 logger = logging.getLogger(__name__)
@@ -295,16 +296,40 @@ def capture_key(device_name: str, timeout: float = 60.0) -> DetectedInput:
 
 def listen(device_name, handler, shutdown_event, status_callback=None):
     devices = {}
-    last_scan = 0
+    last_scan = -math.inf
+    scan_pending = True
+    hotplug_monitor = pyudev.Monitor.from_netlink(pyudev.Context())
 
     def report(state: str, paths=(), error: str | None = None) -> None:
         if status_callback is not None:
             status_callback(state, tuple(sorted(paths)), error)
 
     try:
+        hotplug_monitor.filter_by(subsystem='input')
+        # Subscribe before enumeration so devices arriving during startup are not missed.
+        hotplug_monitor.start()
         while not shutdown_event.is_set():
+            while (
+                not shutdown_event.is_set()
+                and (change := hotplug_monitor.poll(timeout=0)) is not None
+            ):
+                path = change.device_node
+                if (
+                    change.action not in ('add', 'remove', 'change')
+                    or path is None
+                    or not path.startswith('/dev/input/event')
+                ):
+                    continue
+                scan_pending = True
+                if change.action == 'remove' and path in devices:
+                    # A replacement can reuse this path before read_one reports ENODEV.
+                    devices.pop(path).close()
+                    logger.warning('input device lost', extra={'device': device_name, 'path': path})
+                    report('listening' if devices else 'waiting', devices)
+
             current_time = time.monotonic()
-            if not devices and current_time - last_scan >= 0.3:
+            if scan_pending and current_time - last_scan >= 0.3:
+                scan_pending = False
                 scan_failed = False
 
                 def report_scan_error(path: str, error: OSError) -> None:
@@ -313,14 +338,12 @@ def listen(device_name, handler, shutdown_event, status_callback=None):
                     report('error', (path,), str(error))
 
                 matching_paths = matching_device_paths(device_name, report_scan_error)
-                if matching_paths:
-                    report('opening', matching_paths)
-                elif not scan_failed:
+                new_paths = [path for path in matching_paths if path not in devices]
+                if new_paths:
+                    report('opening', (*devices, *new_paths))
+                elif not devices and not scan_failed:
                     report('waiting')
-                for path in matching_paths:
-                    if path in devices:
-                        continue
-
+                for path in new_paths:
                     device = None
                     try:
                         device = InputDevice(path)
@@ -337,11 +360,13 @@ def listen(device_name, handler, shutdown_event, status_callback=None):
                             'input device disappeared before grab',
                             extra={'device': device_name, 'path': path},
                         )
+                        scan_pending = True
                         continue
                     _clear_device_error('grab', path)
                     devices[path] = device
-                if devices:
+                if devices and new_paths:
                     report('listening', devices)
+                scan_pending = scan_pending or scan_failed
                 last_scan = current_time
 
             for path, device in list(devices.items()):
@@ -358,6 +383,7 @@ def listen(device_name, handler, shutdown_event, status_callback=None):
                     )
                     device.close()
                     del devices[path]
+                    scan_pending = True
                     report('listening' if devices else 'waiting', devices)
 
             handler.tick()
@@ -365,6 +391,8 @@ def listen(device_name, handler, shutdown_event, status_callback=None):
     finally:
         for device in devices.values():
             device.close()
+        # pyudev releases its netlink socket when the monitor is dereferenced.
+        del hotplug_monitor
 
 
 def monitor(device_name, event_callback, status_callback, shutdown_event):

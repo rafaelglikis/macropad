@@ -11,6 +11,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Added command-selected application context layers with manual-layer priority and safe fallback.
 
+### Fixed
+
+- Automatically reacquire reconnected pads while other same-name devices remain attached, using
+  udev events instead of continuous device scans.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added
