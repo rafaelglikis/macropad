@@ -37,37 +37,14 @@ or:
 uv tool install poor-mans-macropad
 ```
 
-Then run `macropad doctor` to check input permissions and the runtime environment. The [install guide][install] covers
-installing `pipx`, optional desktop notifications, input permissions, and updating.
+The [install guide][install] covers installing `pipx`, optional desktop notifications, input permissions, and updating.
 
-## Usage
+## Quickstart
 
-Listen using profiles from the default configuration directory:
-
-```bash
-macropad listen
-macropad --verbose listen
-macropad --debug listen
-```
-
-Validate profiles without opening or grabbing input devices:
-
-```bash
-macropad validate
-macropad validate profile.yml
-macropad validate --directory ./profiles
-```
-
-Check input permissions, profile access, and the runtime environment:
+Check input permissions and the runtime environment:
 
 ```bash
 macropad doctor
-```
-
-Inspect live keyboard worker and device state:
-
-```bash
-macropad status
 ```
 
 Create a first profile through guided device and key detection:
@@ -76,12 +53,14 @@ Create a first profile through guided device and key detection:
 macropad init
 ```
 
-List readable input devices and stream key names without grabbing the keyboard:
+Install and start the systemd user service, which loads profiles from the default configuration directory and reloads
+them when they change:
 
 ```bash
-macropad monitor
-macropad monitor 'Exact Device Name'
+macropad service install
 ```
+
+Run `macropad listen` instead to stay in the foreground. The [commands][commands] page lists every command.
 
 ## Profile Format
 

@@ -48,6 +48,10 @@ macropad service disable
 exit status from `systemctl --user` or `journalctl --user`. Use `macropad listen` instead when running
 Macropad directly in the foreground.
 
+## Update
+
+After upgrading the package, refresh the generated unit and restart the service. See [Update](install.md#update).
+
 ## Uninstall
 
 Remove the service before uninstalling the tool:

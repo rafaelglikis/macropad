@@ -41,8 +41,9 @@ commands, which are submitted in the listed order as independent detached proces
 | `double_tap` | Runs after two press/release pairs occur within the multi-tap resolution window.                 |
 | `triple_tap` | Runs after three press/release pairs occur within the multi-tap resolution window.               |
 
-Bindings with multiple event choices or requiring hold or multi-tap resolution wait for a 200 ms
-quiet period. Simple bindings containing one immediate event run without that delay.
+Bindings with multiple event choices or requiring hold or multi-tap resolution wait for the multi-tap window, a quiet
+period of 200 ms by default. [Timing](#timing) configures it. Simple bindings containing one immediate event run without
+that delay.
 
 ```yaml
 device: My Macro Keyboard
@@ -141,8 +142,9 @@ Layer commands begin with `^` and are handled by Macropad instead of the shell:
 Layer references are checked after all fragments for a device are merged. This permits one fragment
 to activate a layer defined in another fragment while still rejecting genuinely missing layers.
 By default, a key absent from the active layer uses its base binding. A layer binding overrides the
-base binding for that key. Add `fallback: none` to make a layer ignore keys it does not bind. A fallback binding
-consumes a one-shot layer just like a binding declared directly in that layer.
+base binding for that key. Add `fallback: none` to make a layer ignore keys it does not bind, which was the behavior for
+every layer before 0.2.0. A fallback binding consumes a one-shot layer just like a binding declared directly in that
+layer.
 
 Top-level layers collect all alternate bindings in one section:
 
