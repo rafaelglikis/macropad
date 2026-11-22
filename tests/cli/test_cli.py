@@ -11,7 +11,7 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-from macropad import __version__, cli, profile_watcher
+from macropad import PROFILE_DOCS_URL, __version__, cli, profile_watcher
 from macropad.cli import listen, profile_files
 from macropad.cli import validate as validate_command
 
@@ -435,7 +435,7 @@ class MainExitStatusTests(unittest.TestCase):
         self.assertEqual([str(default_config_directory)], args.profile_directories)
         self.assertFalse(default_config_directory.exists())
         logger.error.assert_called_once_with(
-            'no profile files found; create a .yml profile or see README.md#profile-format',
+            f'no profile files found; create a .yml profile or see {PROFILE_DOCS_URL}',
             extra={'path': str(default_config_directory)},
         )
         supervisor_type.return_value.start.assert_not_called()

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import interceptor, notifications
+from . import PROFILE_DOCS_URL, interceptor, notifications
 
 PASS = 'PASS'
 FAIL = 'FAIL'
@@ -121,7 +121,7 @@ def check_profile_directory(profile_directory: Path) -> list[DiagnosticResult]:
                 FAIL,
                 'Profile directory',
                 f'{profile_directory} does not exist.',
-                'Create the directory and add a .yml profile; see README.md#profile-format.',
+                f'Create the directory and add a .yml profile; see {PROFILE_DOCS_URL}.',
             )
         ]
     if not profile_directory.is_dir():

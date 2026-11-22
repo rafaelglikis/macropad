@@ -6,7 +6,7 @@ import signal
 import threading
 import time
 
-from .. import notifications, profile_watcher, runtime_status
+from .. import PROFILE_DOCS_URL, notifications, profile_watcher, runtime_status
 from ..supervisor import ProfileSupervisor
 from . import profile_files
 
@@ -100,13 +100,12 @@ def run(args: argparse.Namespace) -> int:
         if not all_profile_paths:
             if using_default_config:
                 logger.error(
-                    'no profile files found; create a .yml profile or see README.md#profile-format',
+                    f'no profile files found; create a .yml profile or see {PROFILE_DOCS_URL}',
                     extra={'path': str(profile_files.DEFAULT_CONFIG_DIR)},
                 )
             else:
                 logger.error(
-                    'no profile files found; check the requested paths or see '
-                    'README.md#profile-format'
+                    f'no profile files found; check the requested paths or see {PROFILE_DOCS_URL}'
                 )
             return 1
 
