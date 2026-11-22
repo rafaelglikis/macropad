@@ -23,7 +23,7 @@
 - Active layers fall back to base bindings by default; `fallback: none` opts out. Momentary layers restore unsuperseded prior state without notifications, and toggle activation keys must always remain able to toggle their layer off.
 - Profiles are strict version `1` YAML. Fragments with the same device name merge before worker startup; duplicate keys, unknown fields/events/key names, and conflicts must retain source/path diagnostics.
 - Runtime profiles live outside the repository under `$XDG_CONFIG_HOME/macropad/profiles/`, defaulting to `~/.config/macropad/profiles/` with a legacy fallback. Do not change user profiles unless explicitly requested.
-- After changing module ownership, dependency direction, process lifecycle, or runtime flow under `src/macropad/`, update `src/macropad/README.md`, including its Mermaid diagrams, so the architecture documentation remains accurate.
+- After changing module ownership, dependency direction, process lifecycle, or runtime flow under `src/macropad/`, update `docs/architecture.md`, including its Mermaid diagrams, so the architecture documentation remains accurate.
 
 ## Intentional Constraints
 

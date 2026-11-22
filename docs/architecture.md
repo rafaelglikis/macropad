@@ -1,6 +1,6 @@
 # Macropad Runtime Architecture
 
-This directory contains the complete runtime implementation for Macropad. Runtime domains use a
+`src/macropad/` contains the complete runtime implementation for Macropad. Runtime domains use a
 flat module layout, while the `cli/` package groups command-specific orchestration behind a small
 argument-parsing and dispatch boundary.
 
