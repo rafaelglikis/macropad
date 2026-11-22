@@ -7,6 +7,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Moved detailed documentation from the README into `docs/`; CLI messages now link to the online profile reference.
+
 ## [0.4.0] - 2026-11-22
 
 ### Added

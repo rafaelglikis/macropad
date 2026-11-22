@@ -59,8 +59,8 @@ bindings:
 
 ## Timing
 
-Timing configuration is optional. Profiles without it retain the existing 200 ms multi-tap window
-and five-second one-shot timeout. Configure either or both fields at the top level:
+Timing configuration is optional. Profiles without it use a 200 ms multi-tap window and a five-second one-shot timeout.
+Configure either or both fields at the top level:
 
 ```yaml
 device: My Macro Keyboard
@@ -141,9 +141,8 @@ Layer commands begin with `^` and are handled by Macropad instead of the shell:
 Layer references are checked after all fragments for a device are merged. This permits one fragment
 to activate a layer defined in another fragment while still rejecting genuinely missing layers.
 By default, a key absent from the active layer uses its base binding. A layer binding overrides the
-base binding for that key. This changes the earlier version 1 behavior, which ignored missing layer
-keys; add `fallback: none` to preserve that behavior for a layer. A fallback binding consumes a
-one-shot layer just like a binding declared directly in that layer.
+base binding for that key. Add `fallback: none` to make a layer ignore keys it does not bind. A fallback binding
+consumes a one-shot layer just like a binding declared directly in that layer.
 
 Top-level layers collect all alternate bindings in one section:
 

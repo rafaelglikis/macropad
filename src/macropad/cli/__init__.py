@@ -2,7 +2,7 @@ import argparse
 import errno
 import logging
 
-from .. import __version__, notifications
+from .. import PROFILE_DOCS_URL, __version__, notifications
 from ..logging_config import configure_logging
 from . import doctor, init, listen, monitor, service, status, validate
 
@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
         'validate',
         help='Validate profiles without opening input devices',
         description='Load, validate, and merge profiles without opening input devices.',
-        epilog='See README.md#profile-format for the complete profile format.',
+        epilog=f'See {PROFILE_DOCS_URL} for the complete profile format.',
     )
     validate_subparser.add_argument(
         'profile_paths', nargs='*', help='Paths to macropad profile files.'

@@ -281,7 +281,7 @@ other open errors are logged once per unresolved operation and path rather than 
 an absent device or repeatedly flooding the journal.
 
 The listener subscribes to a worker-local `pyudev` input monitor before its initial scan, then opens
-and exclusively grabs all paths matching the configured keyboard name. The existing threadless input
+and exclusively grabs all paths matching the configured keyboard name. The threadless input
 loop checks queued udev events without blocking. Event-node add, remove, and change events schedule
 discovery, with scans spaced at least 300 ms apart to coalesce hotplug bursts. Idle listeners do not
 repeat scans, even when waiting for their first device.
